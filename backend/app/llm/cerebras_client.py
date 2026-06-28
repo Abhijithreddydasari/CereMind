@@ -157,6 +157,13 @@ def _simulated_completion(step: Optional[str], json_object: bool) -> ChatResult:
                           completion_tokens=max(1, len(content) // 4), model="gemma-4-31b (sim)",
                           simulated=True)
 
+    if step == "vision":
+        return res(
+            "The attached snapshot shows the acmeshop_nightly_etl DAG with ingest green, "
+            "transform RED (FAILED, OOMKilled), and load skipped. The memory panel is "
+            "pegged at a 2048MB worker_memory_limit - a strong signal of a memory cap, "
+            "not a data problem."
+        )
     if step == "triage":
         return res(
             "A scheduled run of acmeshop_nightly_etl failed at the transform task. "
