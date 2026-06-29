@@ -10,45 +10,89 @@ body,
 
 body {
   margin: 0;
-  background: radial-gradient(1200px 600px at 70% -10%, #1a2030 0%, #0b0e14 55%);
-  color: #e6edf3;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #e8edf6;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  background:
+    radial-gradient(900px 500px at 12% -8%, rgba(124, 92, 255, 0.16), transparent 60%),
+    radial-gradient(900px 500px at 92% -12%, rgba(255, 122, 69, 0.12), transparent 55%),
+    #070a12;
+  background-attachment: fixed;
 }
 
 ::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a3242;
-  border-radius: 8px;
+  background: #232c3c;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #33405a;
+  background-clip: content-box;
 }
 
-@keyframes pulse-ring {
+@layer components {
+  .glass {
+    @apply rounded-2xl border border-edge bg-panel/70 backdrop-blur-xl shadow-card;
+  }
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-gradient-to-r from-accent to-accent2 text-white shadow-[0_8px_24px_-10px_rgba(124,92,255,0.8)] hover:-translate-y-0.5 hover:brightness-110 active:translate-y-0;
+  }
+  .btn-danger {
+    @apply btn bg-gradient-to-r from-bad to-cerebras text-white shadow-[0_8px_24px_-10px_rgba(251,91,91,0.8)] hover:-translate-y-0.5 hover:brightness-110 active:translate-y-0;
+  }
+  .btn-ghost {
+    @apply btn border border-edge bg-elevated/60 text-slate-200 hover:border-edge2 hover:bg-elevated;
+  }
+}
+
+/* status dot with soft glow */
+.dot {
+  position: relative;
+  border-radius: 999px;
+}
+.dot::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 999px;
+  background: inherit;
+  opacity: 0.35;
+  filter: blur(4px);
+}
+
+@keyframes ping-soft {
   0% {
-    box-shadow: 0 0 0 0 rgba(124, 92, 255, 0.5);
+    box-shadow: 0 0 0 0 currentColor;
+    opacity: 0.8;
   }
   70% {
-    box-shadow: 0 0 0 8px rgba(124, 92, 255, 0);
+    box-shadow: 0 0 0 9px transparent;
+    opacity: 0;
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(124, 92, 255, 0);
-  }
-}
-.pulse {
-  animation: pulse-ring 1.6s infinite;
-}
-
-@keyframes fadein {
-  from {
     opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
   }
 }
-.fadein {
-  animation: fadein 0.22s ease-out;
+.live::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  animation: ping-soft 1.6s ease-out infinite;
+  color: currentColor;
 }
