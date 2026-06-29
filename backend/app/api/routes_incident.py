@@ -13,14 +13,39 @@ from app.agents.schemas import IncidentTrigger
 from app.audit import audit_log
 from app.incident_service import get_service
 from app.pipeline.adapter import get_adapter
+from app.pipeline.scenarios import get_scenario, list_scenarios
 
 router = APIRouter(prefix="/api/incidents", tags=["incidents"])
 
 
+def _trigger_for_scenario(scenario_id: str | None, source: str) -> IncidentTrigger:
+    s = get_scenario(scenario_id)
+    return IncidentTrigger(
+        source=source, title=s.title, job_id=s.job_id, failed_task=s.failed_task,
+        summary=s.summary, scenario_id=s.id,
+    )
+
+
+@router.get("/scenarios")
+async def scenarios():
+    """The library of investigable incident packs (for the scenario picker)."""
+    return {"scenarios": list_scenarios()}
+
+
 @router.get("/snapshot.png")
-async def snapshot_png():
+async def snapshot_png(scenario_id: str | None = None):
     """The DAG/build snapshot the alert carries (read by Gemma 4 vision)."""
-    path = get_adapter().get_dag_snapshot_path()
+    if scenario_id:
+        path = get_scenario(scenario_id).snapshot_path
+        try:
+            from app.pipeline.gen_snapshot import generate_snapshot
+
+            if not os.path.exists(path):
+                generate_snapshot(path, get_scenario(scenario_id).snapshot)
+        except Exception:
+            pass
+    else:
+        path = get_adapter().get_dag_snapshot_path()
     if not os.path.exists(path):
         raise HTTPException(404, "snapshot not generated")
     return FileResponse(path, media_type="image/png")
@@ -30,11 +55,12 @@ async def snapshot_png():
 async def alert_webhook(trigger: IncidentTrigger | None = None):
     """Job-failed alert webhook. Auto-starts the investigation with no human."""
     svc = get_service()
-    trig = trigger or IncidentTrigger(
-        source="webhook", title="acmeshop_nightly_etl failed at transform",
-        job_id="acmeshop_nightly_etl", failed_task="transform",
-        summary="Scheduled nightly run failed; transform task errored after 37s.",
-    )
+    if trigger is None:
+        trig = _trigger_for_scenario(None, "webhook")
+    else:
+        trig = trigger
+        if not (trigger.title and trigger.job_id and trigger.failed_task):
+            trig = _trigger_for_scenario(trigger.scenario_id, "webhook")
     trig.source = "webhook"
     incident = svc.open_incident(trig)
     svc.start_investigation(incident)
@@ -45,6 +71,12 @@ async def alert_webhook(trigger: IncidentTrigger | None = None):
 async def manual_start(trigger: IncidentTrigger):
     """Manual start (engineer-initiated), optionally with an attached screenshot."""
     svc = get_service()
+    # If a scenario is chosen without a custom screenshot, align the trigger
+    # metadata to that scenario so the agent investigates the matching world.
+    if trigger.scenario_id and not trigger.snapshot_data_uri:
+        s = get_scenario(trigger.scenario_id)
+        trigger.title, trigger.job_id = s.title, s.job_id
+        trigger.failed_task, trigger.summary = s.failed_task, s.summary
     trigger.source = "manual"
     incident = svc.open_incident(trigger)
     svc.start_investigation(incident)

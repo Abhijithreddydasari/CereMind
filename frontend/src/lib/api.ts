@@ -9,10 +9,13 @@ export type EventType =
   | "tool_call"
   | "observation"
   | "root_cause"
+  | "hypothesis_race"
   | "action_proposed"
   | "awaiting_approval"
   | "action_executed"
   | "verification"
+  | "rollback"
+  | "immunize"
   | "summary"
   | "error"
   | "done";
@@ -54,6 +57,35 @@ export interface RootCause {
   proposed_actions: ProposedAction[];
 }
 
+export interface CandidateFix {
+  action: string;
+  args: Record<string, any>;
+  label: string;
+  predicted_green: number;
+  risk_tier: number;
+  confidence: number;
+  predicted_outcome: string;
+  chosen: boolean;
+}
+
+export interface Guardrail {
+  title: string;
+  policy: string;
+  rationale: string;
+  artifact_kind: string;
+  artifact_id?: string;
+  artifact_url?: string;
+}
+
+export interface Scenario {
+  id: string;
+  title: string;
+  summary: string;
+  job_id: string;
+  failed_task: string;
+  cost_per_min: number;
+}
+
 export interface AppConfig {
   cerebras_model: string;
   cerebras_simulated: boolean;
@@ -62,6 +94,7 @@ export interface AppConfig {
   embedding_backend: string;
   vector_backend: string;
   pipeline_backend: string;
+  scenarios?: Scenario[];
 }
 
 const json = { "Content-Type": "application/json" };
@@ -71,22 +104,28 @@ export async function getConfig(): Promise<AppConfig> {
   return r.json();
 }
 
-export async function fireAlert(): Promise<{ incident_id: string }> {
+export async function getScenarios(): Promise<Scenario[]> {
+  const r = await fetch("/api/incidents/scenarios");
+  const data = await r.json();
+  return data.scenarios ?? [];
+}
+
+export async function fireAlert(scenarioId?: string): Promise<{ incident_id: string }> {
   const r = await fetch("/api/incidents/webhook", {
     method: "POST",
     headers: json,
-    body: "{}",
+    body: JSON.stringify({ scenario_id: scenarioId ?? null }),
   });
   return r.json();
 }
 
-export async function startManual(snapshotDataUri?: string): Promise<{ incident_id: string }> {
+export async function startManual(
+  snapshotDataUri?: string,
+  scenarioId?: string
+): Promise<{ incident_id: string }> {
   const body = {
     source: "manual",
-    title: "acmeshop_nightly_etl failed at transform",
-    job_id: "acmeshop_nightly_etl",
-    failed_task: "transform",
-    summary: "Engineer-initiated investigation.",
+    scenario_id: scenarioId ?? null,
     snapshot_data_uri: snapshotDataUri ?? null,
     attach_seeded_snapshot: !snapshotDataUri,
   };
@@ -97,6 +136,9 @@ export async function startManual(snapshotDataUri?: string): Promise<{ incident_
   });
   return r.json();
 }
+
+export const scenarioSnapshotUrl = (scenarioId: string) =>
+  `/api/incidents/snapshot.png?scenario_id=${encodeURIComponent(scenarioId)}`;
 
 export async function approve(incidentId: string) {
   return fetch(`/api/incidents/${incidentId}/approve`, { method: "POST" });

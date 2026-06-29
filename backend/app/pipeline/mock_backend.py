@@ -1,22 +1,22 @@
-"""Seeded, deterministic mock of the 'AcmeShop nightly ETL' pipeline.
+"""Seeded, deterministic mock of the investigated data/CI pipeline.
 
-DAG: ingest -> transform -> load. A config change ~1h ago cut worker memory
-8192MB -> 2048MB, so the `transform` task is OOMKilled. The fix is to revert
-that config (or retry with more memory) and rerun; only then does the run go
-green. Rerunning without fixing config fails again (the failure is NOT
-transient), which is what makes the agent's diagnosis meaningful.
+The backend is scenario-aware (see app.pipeline.scenarios): it loads one
+incident "pack" at a time. Each pack injects a deterministic fault whose only
+durable fix is to revert the culprit config change (one pack also accepts a
+param override). Rerunning without the correct fix fails again - the failure is
+NOT transient - which is what makes the agent's diagnosis meaningful.
 """
 from __future__ import annotations
 
+import os
 import threading
 import time
-from typing import Any
+from typing import Any, Optional
 
-from app.pipeline.seed import (
-    CULPRIT_CHANGE_ID,
-    GOOD_MEMORY_MB,
-    BAD_MEMORY_MB,
-    build_seed,
+from app.pipeline.scenarios import (
+    DEFAULT_SCENARIO_ID,
+    Scenario,
+    get_scenario,
 )
 
 
@@ -26,7 +26,7 @@ class MockBackend:
 
     def __init__(self) -> None:
         self.name = "mock"
-        self.reset()
+        self.load_scenario(DEFAULT_SCENARIO_ID)
 
     # Singleton so API + agent share one mutable world per process.
     @classmethod
@@ -36,17 +36,40 @@ class MockBackend:
                 cls._singleton = cls()
             return cls._singleton
 
+    # --- scenario lifecycle -------------------------------------------------
+    def load_scenario(self, scenario_id: Optional[str]) -> Scenario:
+        self.scenario = get_scenario(scenario_id)
+        self.reset()
+        return self.scenario
+
     def reset(self) -> None:
-        seed = build_seed()
-        self.job_id: str = seed["job_id"]
-        self.dag: list[str] = seed["dag"]
-        self.runs: list[dict[str, Any]] = seed["runs"]
-        self.logs: dict[str, dict[str, str]] = seed["logs"]
-        self.config_changes: list[dict[str, Any]] = seed["config_changes"]
-        # Current effective worker memory (the injected fault is the low value).
-        self.current_memory_mb: int = BAD_MEMORY_MB
+        s = self.scenario
+        self.job_id = s.job_id
+        self.dag = list(s.dag)
+        self.runs = [dict(r) for r in s.runs]
+        self.logs = {rid: dict(tasks) for rid, tasks in s.logs.items()}
+        self.config_changes = [dict(c) for c in s.config_changes]
         self.reverted_changes: set[str] = set()
-        self.snapshot_path: str = seed["snapshot_path"]
+        self.applied_param_fix = False
+        # Track what CereMind itself applied, so auto-rollback can undo it.
+        self.applied_fixes: list[dict[str, Any]] = []
+        # Test/demo affordance: force the first rerun to fail (exercises rollback).
+        self.force_fail_rerun = False
+        self._ensure_snapshot()
+
+    def _ensure_snapshot(self) -> None:
+        path = self.scenario.snapshot_path
+        if not os.path.exists(path):
+            try:
+                from app.pipeline.gen_snapshot import generate_snapshot
+
+                generate_snapshot(path, self.scenario.snapshot)
+            except Exception:
+                pass  # vision degrades gracefully if matplotlib is unavailable
+
+    @property
+    def is_fixed(self) -> bool:
+        return (self.scenario.culprit_change_id in self.reverted_changes) or self.applied_param_fix
 
     # --- read tools ---------------------------------------------------------
     def get_job_runs(self, job_id: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
@@ -54,7 +77,6 @@ class MockBackend:
         return runs[-limit:][::-1]
 
     def get_job_logs(self, run_id: str | None = None, task_id: str | None = None) -> dict[str, Any]:
-        # Default to the latest failed run.
         if run_id is None:
             failed = [r for r in self.runs if r["status"] == "failed"]
             run_id = (failed or self.runs)[-1]["run_id"]
@@ -64,25 +86,11 @@ class MockBackend:
         return {"run_id": run_id, "tasks": run_logs}
 
     def get_metrics(self, task_id: str | None = None, metric: str = "memory_mb") -> dict[str, Any]:
-        task_id = task_id or "transform"
-        # Memory climbs and hits the (lowered) limit -> OOM.
-        limit = self.current_memory_mb
-        points = []
-        base = limit * 0.35
-        for i in range(12):
-            val = base + (limit * 0.95 - base) * (i / 11)
-            # When the limit is low, it pegs at the limit (OOM) near the end.
-            if val >= limit * 0.98 and limit <= BAD_MEMORY_MB:
-                val = limit
-            points.append({"t": i * 10, f"{metric}": round(val, 1)})
-        return {
-            "task_id": task_id,
-            "metric": metric,
-            "limit": limit,
-            "unit": "MB",
-            "oom": limit <= BAD_MEMORY_MB,
-            "points": points,
-        }
+        m = dict(self.scenario.metrics)
+        # Honor the requested task/metric labels while keeping the scenario's series.
+        if task_id:
+            m["task_id"] = task_id
+        return m
 
     def list_recent_config_changes(self, limit: int = 10) -> list[dict[str, Any]]:
         out = []
@@ -95,84 +103,63 @@ class MockBackend:
     def config_diff(self, change_id: str) -> dict[str, Any]:
         for c in self.config_changes:
             if c["id"] == change_id:
-                return {
-                    "id": c["id"],
-                    "author": c["author"],
-                    "ts": c["ts"],
-                    "summary": c["summary"],
-                    "diff": c["diff"],
-                    "reverted": c["id"] in self.reverted_changes,
-                }
+                return {**{k: c[k] for k in ("id", "author", "ts", "summary", "diff")},
+                        "reverted": c["id"] in self.reverted_changes}
         return {"error": f"unknown change_id {change_id}"}
 
     def get_dag_snapshot_path(self) -> str:
-        return self.snapshot_path
+        self._ensure_snapshot()
+        return self.scenario.snapshot_path
 
     # --- remediation (mutating) --------------------------------------------
     def revert_config(self, change_id: str) -> dict[str, Any]:
-        if change_id != CULPRIT_CHANGE_ID:
-            return {
-                "ok": False,
-                "change_id": change_id,
-                "message": "Change reverted, but it was not the cause of the failure.",
-            }
+        if change_id != self.scenario.culprit_change_id:
+            return {"ok": False, "change_id": change_id,
+                    "message": "Change reverted, but it was not the cause of the failure."}
         self.reverted_changes.add(change_id)
-        self.current_memory_mb = GOOD_MEMORY_MB
-        return {
-            "ok": True,
-            "change_id": change_id,
-            "message": f"Reverted {change_id}: worker memory restored to {GOOD_MEMORY_MB}MB.",
-            "worker_memory_mb": GOOD_MEMORY_MB,
-        }
+        self.applied_fixes.append({"kind": "revert_config", "change_id": change_id})
+        return {"ok": True, "change_id": change_id,
+                "message": f"Reverted {change_id}: restored the pre-incident pipeline config."}
 
     def retry_with_params(self, job_id: str, params: dict[str, Any]) -> dict[str, Any]:
-        mem = params.get("worker_memory_mb") or params.get("memory_mb")
-        if mem and int(mem) >= GOOD_MEMORY_MB:
-            self.current_memory_mb = int(mem)
-            return {
-                "ok": True,
-                "job_id": job_id,
-                "message": f"Applied override worker_memory_mb={mem} for next run.",
-                "worker_memory_mb": int(mem),
-            }
-        return {
-            "ok": False,
-            "job_id": job_id,
-            "message": "Param override insufficient; transform needs >= "
-            f"{GOOD_MEMORY_MB}MB to avoid OOM.",
-        }
+        pf = self.scenario.param_fix
+        if pf:
+            val = next((params.get(k) for k in pf["keys"] if params.get(k) is not None), None)
+            if val is not None and int(val) >= int(pf["min"]):
+                self.applied_param_fix = True
+                self.applied_fixes.append({"kind": "param", "params": dict(params)})
+                return {"ok": True, "job_id": job_id, "message": pf["message"]}
+            return {"ok": False, "job_id": job_id,
+                    "message": f"Param override insufficient; need >= {pf['min']} to fix."}
+        return {"ok": False, "job_id": job_id,
+                "message": "A param override does not address this failure class; revert the culprit change."}
 
     def rerun_job(self, job_id: str) -> dict[str, Any]:
-        healthy = self.current_memory_mb >= GOOD_MEMORY_MB
+        healthy = self.is_fixed and not self.force_fail_rerun
         status = "success" if healthy else "failed"
-        run_id = f"run_{int(time.time())}"
-        new_run = {
-            "run_id": run_id,
-            "job_id": job_id,
-            "status": status,
+        run_id = f"run_{int(time.time() * 1000) % 1_000_000}"
+        self.runs.append({
+            "run_id": run_id, "job_id": job_id, "status": status,
             "started_at": time.time(),
-            "duration_s": 142 if healthy else 38,
-            "failed_task": None if healthy else "transform",
+            "duration_s": 142 if healthy else 24,
+            "failed_task": None if healthy else self.scenario.failed_task,
             "trigger": "rerun",
-        }
-        self.runs.append(new_run)
-        if not healthy:
-            self.logs[run_id] = {
-                "ingest": "OK ingested 1,240,338 rows",
-                "transform": "ERROR: transform OOMKilled (memory limit "
-                f"{self.current_memory_mb}MB exceeded). Process killed by cgroup.",
-            }
-        else:
-            self.logs[run_id] = {
-                "ingest": "OK ingested 1,240,338 rows",
-                "transform": "OK transformed 1,240,338 rows (peak mem 6,912MB)",
-                "load": "OK loaded 1,240,338 rows into warehouse.checkout_facts",
-            }
-        return {
-            "ok": healthy,
-            "run_id": run_id,
-            "status": status,
-            "message": "Rerun succeeded; pipeline is green."
-            if healthy
-            else "Rerun failed again (transform OOMKilled). Root cause not yet fixed.",
-        }
+        })
+        self.logs[run_id] = dict(self.scenario.green_logs if healthy else self.scenario.red_logs)
+        return {"ok": healthy, "run_id": run_id, "status": status,
+                "message": ("Rerun succeeded; pipeline is green." if healthy
+                            else f"Rerun failed again ({self.scenario.failed_task}). Root cause not yet fixed.")}
+
+    # --- auto-rollback (undo CereMind's own change) ------------------------
+    def rollback_applied_fixes(self) -> dict[str, Any]:
+        undone: list[str] = []
+        for fix in reversed(self.applied_fixes):
+            if fix["kind"] == "revert_config":
+                self.reverted_changes.discard(fix["change_id"])
+                undone.append(f"re-applied {fix['change_id']} (undo of our revert)")
+            elif fix["kind"] == "param":
+                self.applied_param_fix = False
+                undone.append("removed our param override")
+        self.applied_fixes = []
+        return {"ok": True, "undone": undone,
+                "message": "Rolled back CereMind's changes; pipeline restored to pre-remediation state."}

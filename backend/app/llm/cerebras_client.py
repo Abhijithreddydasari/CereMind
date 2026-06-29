@@ -45,7 +45,7 @@ class CerebrasClient:
     def __init__(self) -> None:
         self.settings = get_settings()
         self.model = self.settings.cerebras_model
-        self.simulated = not self.settings.has_cerebras
+        self.simulated = (not self.settings.has_cerebras) or self.settings.force_simulated
 
     # ----------------------------------------------------------------- chat
     async def chat_completion(
@@ -145,103 +145,50 @@ class CerebrasClient:
 
 
 # --------------------------------------------------------------------------- #
-# Simulated (offline) scripted agent
+# Simulated (offline) scripted agent - scenario-driven
 # --------------------------------------------------------------------------- #
-def _simulated_completion(step: Optional[str], json_object: bool) -> ChatResult:
-    from app.pipeline.seed import CULPRIT_CHANGE_ID, JOB_ID
+def _active_scenario():
+    """The incident pack currently loaded in the mock backend."""
+    from app.pipeline.mock_backend import MockBackend
 
+    return MockBackend.instance().scenario
+
+
+def _simulated_completion(step: Optional[str], json_object: bool) -> ChatResult:
     step = step or ""
+    sim = _active_scenario().sim
 
     def res(content: str = "", tcs: Optional[list[ToolCall]] = None) -> ChatResult:
         return ChatResult(content=content, tool_calls=tcs or [], latency_ms=11.0,
                           completion_tokens=max(1, len(content) // 4), model="gemma-4-31b (sim)",
                           simulated=True)
 
+    def calls(key: str) -> list[ToolCall]:
+        return [_mk_toolcall(name, dict(args)) for name, args in sim.get(key, [])]
+
     if step == "vision":
-        return res(
-            "The attached snapshot shows the acmeshop_nightly_etl DAG with ingest green, "
-            "transform RED (FAILED, OOMKilled), and load skipped. The memory panel is "
-            "pegged at a 2048MB worker_memory_limit - a strong signal of a memory cap, "
-            "not a data problem."
-        )
+        return res(sim["vision"])
     if step == "triage":
-        return res(
-            "A scheduled run of acmeshop_nightly_etl failed at the transform task. "
-            "I'll engage the telemetry, change, and knowledge specialists, then synthesize."
-        )
-    if step == "telemetry:act":
-        return res(tcs=[
-            _mk_toolcall("get_job_runs", {"job_id": JOB_ID, "limit": 5}),
-            _mk_toolcall("get_job_logs", {}),
-            _mk_toolcall("get_metrics", {"task_id": "transform", "metric": "memory_mb"}),
-        ])
-    if step == "telemetry:summary":
-        return res(
-            "transform was OOMKilled: worker memory pegged at the 2048MB limit, while "
-            "the last 3 nightly runs succeeded with a ~6.9GB peak. The memory ceiling, "
-            "not the data, is the problem."
-        )
-    if step == "change:act":
-        return res(tcs=[
-            _mk_toolcall("list_recent_config_changes", {"limit": 5}),
-            _mk_toolcall("config_diff", {"change_id": CULPRIT_CHANGE_ID}),
-        ])
-    if step == "change:summary":
-        return res(
-            f"Config change {CULPRIT_CHANGE_ID} by costopt-bot ~1h ago cut "
-            "transform worker_memory_mb from 8192 to 2048 - immediately before the failure."
-        )
-    if step == "knowledge:act":
-        return res(tcs=[
-            _mk_toolcall("query_runbook", {"query": "transform task OOMKilled memory limit exceeded"}),
-            _mk_toolcall("find_similar_failures", {"query": "nightly etl transform OOM after config change"}),
-        ])
-    if step == "knowledge:summary":
-        return res(
-            "The OOM runbook and past incident INC-1042 agree: revert the memory-cutting "
-            "config change (or raise the limit) and rerun. The failure is deterministic, "
-            "so a plain rerun would just fail again."
-        )
+        return res(sim["triage"])
+    if step.endswith(":act"):
+        spec = step.split(":", 1)[0]
+        return res(tcs=calls(f"{spec}_act"))
+    if step.endswith(":summary"):
+        spec = step.split(":", 1)[0]
+        return res(sim.get(f"{spec}_summary", "(no finding)"))
+    if step.startswith("race:"):
+        action = step.split(":", 1)[1]
+        cand = next((c for c in sim["candidates"] if c["action"] == action), None)
+        if cand is None:
+            cand = sim["candidates"][-1]
+        return res(content=json.dumps({
+            "action": cand["action"], "predicted_green": cand["predicted_green"],
+            "risk_tier": cand["risk_tier"], "confidence": cand["confidence"],
+            "predicted_outcome": cand["predicted_outcome"]}))
+    if step == "immunize":
+        return res(content=json.dumps(sim["guardrail"]))
     if step == "synthesis" or json_object:
-        payload = {
-            "root_cause": (
-                "Config change " + CULPRIT_CHANGE_ID + " reduced transform worker_memory_mb "
-                "from 8192 to 2048, causing the transform task to be OOMKilled."
-            ),
-            "confidence": 0.93,
-            "hypotheses": [
-                {
-                    "claim": "Lowered worker memory (8192->2048MB) caused transform OOMKill.",
-                    "likelihood": 0.93,
-                    "evidence": [
-                        {"source": "job_log", "ref": "run_2004",
-                         "detail": "transform OOMKilled: memory limit 2048MB exceeded"},
-                        {"source": "metrics", "ref": "transform.memory_mb",
-                         "detail": "Memory pegged at 2048MB limit vs ~6.9GB healthy peak"},
-                        {"source": "config_change", "ref": CULPRIT_CHANGE_ID,
-                         "detail": "worker_memory_mb 8192->2048 by costopt-bot 1h before failure"},
-                        {"source": "incident", "ref": "INC-1042",
-                         "detail": "Identical past OOM resolved by reverting the memory change"},
-                    ],
-                },
-                {
-                    "claim": "Transient/data-volume issue (rerun would fix).",
-                    "likelihood": 0.05,
-                    "evidence": [
-                        {"source": "runbook", "ref": "rb_oom_transform",
-                         "detail": "Failure is deterministic, not transient; plain rerun fails again"},
-                    ],
-                },
-            ],
-            "proposed_actions": [
-                {"action": "revert_config", "args": {"change_id": CULPRIT_CHANGE_ID},
-                 "risk_tier": 2,
-                 "rationale": "Restore worker_memory_mb to 8192 by reverting the offending change."},
-                {"action": "rerun_job", "args": {"job_id": JOB_ID}, "risk_tier": 2,
-                 "rationale": "Rerun the nightly ETL to verify recovery after the fix."},
-            ],
-        }
-        return res(content=json.dumps(payload))
+        return res(content=json.dumps(sim["synthesis"]))
     return res("Acknowledged.")
 
 

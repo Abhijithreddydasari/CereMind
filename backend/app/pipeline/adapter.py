@@ -53,6 +53,14 @@ class PipelineAdapter(ABC):
     def rerun_job(self, job_id: str) -> dict[str, Any]:
         ...
 
+    def rollback_applied_fixes(self) -> dict[str, Any]:
+        """Undo any change this backend applied during remediation.
+
+        Concrete backends (mock) override this; the default is a safe no-op so a
+        real orchestrator without an undo path still degrades gracefully.
+        """
+        return {"ok": True, "undone": [], "message": "No rollback path configured for this backend."}
+
 
 def get_adapter() -> PipelineAdapter:
     """Factory honoring PIPELINE_BACKEND."""

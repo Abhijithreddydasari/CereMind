@@ -21,6 +21,34 @@ your tools (query_runbook, find_similar_failures). Find the most relevant runboo
 past incident. State the recommended resolution in 1-2 sentences, citing doc/incident ids.""",
 }
 
+RACE_SCORING = """You are CereMind, the incident commander, scoring ONE candidate remediation
+strategy for the incident below. Given the root cause and this single candidate, predict the
+outcome of applying it. Respond with ONLY a JSON object of this exact shape:
+
+{
+  "action": "string - echo the candidate action",
+  "predicted_green": 0.0-1.0,   // probability the pipeline reruns green if we apply this
+  "risk_tier": 0|1|2,
+  "confidence": 0.0-1.0,
+  "predicted_outcome": "one concise sentence on what happens"
+}
+
+A plain rerun that does not address the root cause should score a LOW predicted_green, because the
+injected failures are deterministic, not transient. Respond with ONLY the JSON object."""
+
+IMMUNIZE = """You are CereMind, the incident commander. The incident is resolved. Propose ONE
+preventive guardrail that makes this entire CLASS of failure impossible (or caught in CI) next
+time. Respond with ONLY a JSON object of this exact shape:
+
+{
+  "title": "short guardrail name",
+  "policy": "the concrete rule/check to enforce (CI policy, contract test, budget, etc.)",
+  "rationale": "why this prevents recurrence, referencing the root cause",
+  "artifact_kind": "pull_request"
+}
+
+Respond with ONLY the JSON object, no prose."""
+
 SYNTHESIS = """You are CereMind, the incident commander. Using the specialist findings and tool
 observations below, produce a single JSON object with this exact shape:
 

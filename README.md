@@ -55,17 +55,33 @@ Detect  ->  Diagnose  ->  Fix  ->  Verify  ->  (Rollback if not green)  ->  Immu
 |---|---|---|
 | Closed-loop **action** (apply fix) | No - outputs a plan | **Yes** - applies fix via real tools |
 | **Verify** the fix worked | No | **Yes** - reruns and confirms green |
-| **Auto-rollback** safety net | No | **Adding** - reverts itself + escalates if rerun fails |
-| **Immunize** (prevent recurrence) | No | **Adding** - generates a preventive guardrail/policy + files it |
-| **Hypothesis racing** (speed -> better decisions) | No | **Adding** - scores N candidate fixes in parallel, picks safest |
-| **Business-impact meter** (MTTR + $) | Speed only | **Adding** - live downtime-cost ticker, freezes on resolve |
-| **Blast-radius** / downstream impact | No | **Adding** - downstream dependency + SLA impact map |
+| **Auto-rollback** safety net | No | **Yes** - reverts itself + escalates if rerun isn't green |
+| **Immunize** (prevent recurrence) | No | **Yes** - generates a preventive guardrail/policy + files it as a PR |
+| **Hypothesis racing** (speed -> better decisions) | No | **Yes** - scores N candidate fixes in parallel, picks safest |
+| **Business-impact meter** (MTTR + $) | Speed only | **Yes** - MTTR + downtime-cost avoided, per incident |
+| **Multi-incident breadth** | n/a | **Yes** - 4 distinct failure classes (OOM, schema drift, dependency bump, vendor 429) |
+| **Blast-radius** / downstream impact | No | Roadmap - downstream dependency + SLA impact map |
 | Risk-tiered **approval gate** | n/a | **Yes** |
 | Immutable **audit log** / post-mortem | Partial | **Yes** |
 | **Sovereign self-host** (open-weight) | Usually SaaS-locked | **Yes** - Gemma + EmbeddingGemma, runs in-perimeter |
 | Real orchestrator via **swappable adapter** | n/a | **Yes** - mock -> Airflow/CI |
 
-(Yes = implemented today; Adding = on the demo roadmap below.)
+(Yes = implemented today; Roadmap = not yet built.)
+
+### Incident library (multi-incident breadth)
+
+CereMind ships **four distinct data/CI-pipeline incident packs**, each with its own DAG snapshot,
+logs, metrics, config history, runbooks, culprit, fix, and preventive guardrail - so the agent's
+reasoning visibly differs per incident instead of replaying one script:
+
+| Scenario | Failed stage | Root cause | Fix | Guardrail filed |
+|---|---|---|---|---|
+| Memory cut -> OOMKill | transform | cost-bot cut `worker_memory_mb` 8192->2048 | revert change + rerun | block memory cuts below floor |
+| Schema / data-contract drift | transform | source v2 renamed `customer_id`->`cust_id` | revert source change + rerun | schema-contract check in CI |
+| Dependency / image bump | transform | pyarrow 14->17 removed an API | revert image pin + rerun | gate bumps behind a canary |
+| Vendor rate-limit (HTTP 429) | ingest | concurrency 4->32 exceeded the contract | revert concurrency + rerun | per-vendor concurrency budget |
+
+Pick a scenario in the War Room before firing the alert.
 
 ### Flagship feature - Immunize (preventive guardrail generation)
 
@@ -76,19 +92,21 @@ require SRE review for memory-affecting changes."* Each incident leaves the syst
 more reliable - reactive firefighting becomes compounding prevention. No triage-only tool can
 do this, because prevention requires an agent that already understands and acts on the fix.
 
-### Roadmap features being added (the demo standouts)
+### The demo standouts (now implemented)
 
-1. **Immunize** - the flagship preventive-guardrail step above (a "Prevention" card + filed artifact).
+1. **Immunize** - the flagship preventive-guardrail step above (a "Prevention" card + filed PR artifact).
 2. **Verify + auto-rollback** - if the rerun isn't green, CereMind reverts its own change and
-   escalates. Autonomy *with* a seatbelt - the thing that makes "let the AI act" enterprise-credible.
+   escalates (ticket + Slack). Autonomy *with* a seatbelt - the thing that makes "let the AI act"
+   enterprise-credible.
 3. **Hypothesis racing** - because Cerebras is fast, CereMind evaluates multiple candidate fixes
-   (rerun-as-is / bump-memory / revert) in parallel, scores each with a predicted outcome, and
-   picks the safest. Turns raw token speed into **decision quality**, the strongest justification
-   for *why Cerebras specifically*.
-4. **Business-impact meter** - a live downtime-cost + MTTR ticker that counts from the alert and
-   freezes on resolution ("vs ~20 min human MTTR; $X downtime avoided"). Makes Track 3 impact tangible.
-5. **Blast-radius map** - downstream dependency/SLA impact (transform -> load skipped -> revenue
-   dashboard stale -> revenue team blocked) for business context no triage tool surfaces.
+   (rerun-as-is / override / revert) **in parallel** (`asyncio.gather` over Cerebras calls), scores
+   each with a predicted outcome, and picks the safest. Turns raw token speed into **decision
+   quality**, the strongest justification for *why Cerebras specifically*. A plain rerun scores low
+   because the injected failures are deterministic.
+4. **Business-impact meter** - MTTR + dollars-of-downtime-avoided (per-scenario `$ / min` vs a
+   human-MTTR baseline), surfaced on resolution. Makes Track 3 impact tangible.
+
+Still on the roadmap: a **blast-radius map** (downstream dependency/SLA impact).
 
 ## Architecture
 
@@ -105,7 +123,10 @@ Incident Commander  --- vision (Gemma 4) reads the snapshot
    - knowledge : query_runbook / find_similar_failures  (EmbeddingGemma + Qdrant)
         |  findings + observations
         v
- Synthesis -> structured, cited Root Cause + proposed actions (risk-tiered)
+ Synthesis -> structured, cited Root Cause
+        |
+        v
+ Hypothesis racing -> score N candidate fixes in parallel (Cerebras), pick safest
         |
         v
  [ Tier 2 high-risk? ] --yes--> Human approval gate --approve--> apply fix
@@ -113,7 +134,9 @@ Incident Commander  --- vision (Gemma 4) reads the snapshot
         no (auto)                                                  v
         +--------------------------------------------> revert_config -> rerun_job
                                                                    |
-                                                          verify green -> summary + audit log
+                                            verify green? --no--> auto-rollback + escalate
+                                                   |
+                                                  yes -> summary (MTTR + $) -> Immunize (file guardrail PR) -> audit log
 ```
 
 Everything runs in **one Cloud Run container** (FastAPI serving a React SPA). Gemma 4 runs on
@@ -160,9 +183,12 @@ and the backend then serves the SPA at `http://localhost:8090/`.
 
 ### 3. Try it
 
-- Open the app, click **Simulate job-failed alert**, and watch the live investigation.
-- When it reaches the gate, click **Approve & apply fix** to let CereMind revert the config and
-  rerun the job to green.
+- Open the app, **pick a scenario** (OOM, schema drift, dependency bump, or vendor 429), click
+  **Simulate job-failed alert**, and watch the live investigation, the parallel **hypothesis race**,
+  and the cited root cause.
+- When it reaches the gate, click **Approve & apply fix** to let CereMind apply the fix and rerun
+  the job to green - then it files a preventive **guardrail PR** (Immunize) and shows MTTR + dollars
+  avoided. If a rerun doesn't go green, it **auto-rolls-back** its own change and escalates.
 - Open the **Cerebras vs GPU** tab and run the same prompt on both engines.
 
 ## Verify the real Cerebras path
@@ -179,6 +205,7 @@ python smoke_test.py         # full offline end-to-end agent + RAG + remediation
 |---|---|
 | `CEREBRAS_API_KEY` | Enables real Gemma 4 on Cerebras. Unset = simulated agent. |
 | `CEREBRAS_MODEL` | Defaults to `gemma-4-31b`. |
+| `FORCE_SIMULATED` | `true` forces the deterministic simulated agent even with a key set (offline/deterministic demos & tests). |
 | `BASELINE_BASE_URL` / `BASELINE_MODEL` / `BASELINE_API_KEY` | Optional real GPU endpoint for the speed comparison. Unset = simulated baseline at `BASELINE_SIM_TPS`. |
 | `EMBEDDING_BACKEND` | `auto` (EmbeddingGemma if installed, else ST, else hashing) / `embeddinggemma` / `hashing`. |
 | `HUGGINGFACE_TOKEN` | For pulling gated EmbeddingGemma weights. |
@@ -222,7 +249,7 @@ backend/app/
   llm/         cerebras_client (real + simulated), baseline_client
   tools/       telemetry / changes / knowledge / remediation + registry (strict schemas, risk tiers)
   rag/         embeddings (EmbeddingGemma) + vectorstore (Qdrant) + ingest (corpus)
-  pipeline/    adapter + mock_backend + airflow_backend + seed + gen_snapshot
+  pipeline/    scenarios (4 incident packs) + adapter + mock_backend + airflow_backend + gen_snapshot
   api/         routes_incident (webhook/start/SSE) + routes_actions (approval) + routes_speed
   audit/       append-only audit log
 frontend/src/  IncidentConsole, AgentTimeline, RootCauseCard, RemediationPanel, SpeedCompare, ScreenshotDrop

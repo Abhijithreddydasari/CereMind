@@ -53,6 +53,14 @@ class IncidentService:
 
     # --- lifecycle ----------------------------------------------------------
     def open_incident(self, trigger: IncidentTrigger) -> Incident:
+        # Activate the selected incident pack in the (mock) backend so the agent
+        # investigates the right world. No-op for non-mock backends.
+        try:
+            from app.pipeline.mock_backend import MockBackend
+
+            MockBackend.instance().load_scenario(trigger.scenario_id)
+        except Exception:
+            pass
         incident = Incident(trigger=trigger)
         self._incidents[incident.id] = incident
         return incident

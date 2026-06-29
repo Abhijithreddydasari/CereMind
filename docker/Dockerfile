@@ -41,9 +41,8 @@ SentenceTransformer('${EMBEDDING_GEMMA_MODEL}', token=os.environ.get('HF_TOKEN')
 COPY backend/ ./backend/
 COPY --from=frontend /fe/dist ./backend/app/static
 
-# Pre-generate the DAG snapshot so the first request is instant.
-RUN cd backend && python -c "from app.pipeline.gen_snapshot import generate_snapshot; \
-from app.pipeline.seed import SNAPSHOT_PATH; generate_snapshot(SNAPSHOT_PATH)" || true
+# Pre-generate every scenario's DAG snapshot so the first request is instant.
+RUN cd backend && python -c "from app.pipeline.gen_snapshot import generate_all; generate_all()" || true
 
 WORKDIR /app/backend
 EXPOSE 8080
