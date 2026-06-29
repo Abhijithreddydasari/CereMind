@@ -21,14 +21,35 @@ class BaselineClient:
         self.simulated = not self.settings.has_baseline
         self.label = self.settings.baseline_label
         self.model = self.settings.baseline_model or "gpu-baseline"
+        # Authoritative usage from the endpoint, populated after stream_tokens().
+        self.last_usage: dict[str, Any] | None = None
 
-    async def stream_tokens(self, messages: list[dict[str, Any]]) -> AsyncGenerator[str, None]:
+    async def stream_tokens(
+        self,
+        messages: list[dict[str, Any]],
+        max_tokens: int | None = None,
+    ) -> AsyncGenerator[str, None]:
+        self.last_usage = None
         if self.simulated:
+            n = 0
             async for chunk in self._simulated_stream():
+                n += 1
                 yield chunk
+            self.last_usage = {"completion_tokens": n}
             return
 
-        payload = {"model": self.settings.baseline_model, "messages": messages, "stream": True}
+        payload: dict[str, Any] = {
+            "model": self.settings.baseline_model,
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            # vLLM extension: reason on the GPU too, so both engines run the *same*
+            # Gemma 4 workload (chain-of-thought + answer) - a fair, like-for-like
+            # race. Flip to False if you want the GPU to skip thinking.
+            "chat_template_kwargs": {"enable_thinking": True},
+        }
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
         url = f"{self.settings.baseline_base_url.rstrip('/')}/chat/completions"
         headers = {}
         if self.settings.baseline_api_key:
@@ -44,11 +65,19 @@ class BaselineClient:
                         break
                     try:
                         obj = json.loads(data)
-                        delta = obj["choices"][0]["delta"].get("content")
-                        if delta:
-                            yield delta
-                    except (json.JSONDecodeError, KeyError, IndexError):
+                    except json.JSONDecodeError:
                         continue
+                    if obj.get("usage"):
+                        self.last_usage = obj["usage"]
+                    choices = obj.get("choices") or []
+                    if not choices:
+                        continue
+                    # vLLM emits reasoning under `reasoning_content` (with the gemma4
+                    # reasoning parser) and the answer under `content` - surface both.
+                    d = choices[0].get("delta") or {}
+                    delta = d.get("content") or d.get("reasoning_content") or d.get("reasoning")
+                    if delta:
+                        yield delta
 
     async def _simulated_stream(self) -> AsyncGenerator[str, None]:
         text = (

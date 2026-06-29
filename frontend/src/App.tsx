@@ -26,15 +26,19 @@ export default function App() {
   const live = cfg && !cfg.cerebras_simulated;
 
   return (
-    <div className="min-h-full bg-grid-faint bg-[size:44px_44px]">
+    <div className="relative min-h-full bg-grid-faint bg-[size:44px_44px]">
+      <div className="ambient">
+        <div className="core" />
+      </div>
+      <div className="relative z-10">
       <header className="sticky top-0 z-20 border-b border-edge/70 bg-ink/70 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-4 px-6 py-3.5">
           <div className="flex items-center gap-3">
-            <div className="relative grid h-10 w-10 place-items-center rounded-2xl bg-gradient-to-br from-accent via-accent2 to-cerebras shadow-[0_8px_24px_-8px_rgba(124,92,255,0.9)]">
-              <Bolt className="h-5 w-5 text-white" />
+            <div className="relative grid h-10 w-10 place-items-center rounded-2xl bg-gradient-to-br from-accent via-accent2 to-cyan text-ink shadow-cyanGlow">
+              <Bolt className="h-5 w-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2 text-[19px] font-extrabold leading-none tracking-tight">
+              <div className="flex items-center gap-2 text-[19px] font-extrabold leading-none tracking-tight text-accent2">
                 CereMind
                 <span className="pill border-accent/30 bg-accent/10 text-accent2">
                   <Sparkle className="h-3 w-3" /> agentic SRE
@@ -85,7 +89,7 @@ export default function App() {
             active={tab === "speed"}
             onClick={() => setTab("speed")}
             icon={<Bolt className="h-4 w-4" />}
-            label="Cerebras vs GPU"
+            label="Cerebras vs Modal"
           />
           <div className="ml-auto hidden items-center gap-1.5 self-center pb-2 text-[11px] text-muted sm:flex">
             <Shield className="h-3.5 w-3.5" /> read-only by default - writes gated by approval
@@ -96,6 +100,7 @@ export default function App() {
       <main className="mx-auto max-w-[1440px] px-6 py-6">
         {tab === "warroom" ? <IncidentConsole cfg={cfg} /> : <SpeedCompare cfg={cfg} />}
       </main>
+      </div>
     </div>
   );
 }

@@ -25,6 +25,10 @@ from pathlib import Path
 from typing import Any, Optional
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
+# Drop a hand-made / ChatGPT-generated dashboard here as `<scenario_id>.png`
+# (or .jpg/.webp) and it overrides the auto-generated snapshot for that scenario.
+CUSTOM_DIR = DATA_DIR / "custom"
+_CUSTOM_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 
 # Fixed reference epoch so every demo reads consistently.
 _T0 = 1_751_000_000
@@ -71,8 +75,22 @@ class Scenario:
     param_fix: Optional[dict[str, Any]] = None
 
     @property
-    def snapshot_path(self) -> str:
+    def generated_snapshot_path(self) -> str:
         return str(DATA_DIR / f"snapshot_{self.id}.png")
+
+    @property
+    def custom_snapshot_path(self) -> str | None:
+        for ext in _CUSTOM_EXTS:
+            p = CUSTOM_DIR / f"{self.id}{ext}"
+            if p.exists():
+                return str(p)
+        return None
+
+    @property
+    def snapshot_path(self) -> str:
+        """The image Gemma 4 vision reads - a user-dropped custom dashboard if
+        present, otherwise the auto-generated one."""
+        return self.custom_snapshot_path or self.generated_snapshot_path
 
 
 # --------------------------------------------------------------------------- #
@@ -170,14 +188,18 @@ _oom = Scenario(
                   "change that reduced it. (Distractor for memory incidents.)")},
     ],
     snapshot={
-        "title": "acmeshop_nightly_etl  -  run_2004",
-        "subtitle": "schedule  -  FAILED after 37s",
-        "stages": [("ingest", "success", "ok"), ("transform", "FAILED (OOMKilled)", "fail"),
+        "title": "acmeshop_nightly_etl - run_2004",
+        "subtitle": "schedule - FAILED after 37s",
+        "sev": "SEV-2",
+        "stages": [("ingest", "success", "ok"), ("transform", "FAILED - OOMKilled", "fail"),
                    ("load", "skipped", "skip")],
-        "panel_title": "transform: worker memory (MB)",
+        "panel_title": "transform - worker memory",
         "limit": _OOM_BAD_MB,
-        "limit_label": "worker_memory_limit = 2048MB",
+        "unit": "MB",
+        "limit_label": "worker_memory_limit 2048MB",
         "peg": True,
+        "error_line": "ERROR transform OOMKilled: memory limit 2048MB exceeded - killed by cgroup (signal 9)",
+        "stats": [("Peak mem", "2048 MB"), ("Healthy peak", "6912 MB"), ("Failed in", "37s")],
     },
     sim={
         "vision": ("The snapshot shows the acmeshop_nightly_etl DAG with ingest green, transform "
@@ -328,14 +350,18 @@ _schema = Scenario(
                   "transform contract violations.)")},
     ],
     snapshot={
-        "title": "acmeshop_orders_sync  -  run_5567",
-        "subtitle": "schedule  -  FAILED after 19s",
-        "stages": [("ingest", "success", "ok"), ("transform", "FAILED (contract)", "fail"),
+        "title": "acmeshop_orders_sync - run_5567",
+        "subtitle": "schedule - FAILED after 19s",
+        "sev": "SEV-2",
+        "stages": [("ingest", "success", "ok"), ("transform", "FAILED - contract", "fail"),
                    ("load", "skipped", "skip")],
-        "panel_title": "transform: rows rejected by contract",
+        "panel_title": "transform - rows rejected by contract",
         "limit": 412889,
+        "unit": "rows",
         "limit_label": "412,889 / 412,889 rows rejected",
         "peg": True,
+        "error_line": "ERROR data-contract: not-null column 'customer_id' missing - source emits 'cust_id'",
+        "stats": [("Rows rejected", "100%"), ("Contract", "orders@v3"), ("Failed in", "19s")],
     },
     sim={
         "vision": ("The snapshot shows acmeshop_orders_sync with ingest green, transform RED (contract "
@@ -483,14 +509,18 @@ _dep = Scenario(
                   "timeouts, not dependency errors.)")},
     ],
     snapshot={
-        "title": "acmeshop_reco_features  -  run_8123",
-        "subtitle": "schedule  -  FAILED after 12s",
-        "stages": [("ingest", "success", "ok"), ("transform", "FAILED (ArrowInvalid)", "fail"),
+        "title": "acmeshop_reco_features - run_8123",
+        "subtitle": "schedule - FAILED after 12s",
+        "sev": "SEV-3",
+        "stages": [("ingest", "success", "ok"), ("transform", "FAILED - ArrowInvalid", "fail"),
                    ("load", "skipped", "skip")],
-        "panel_title": "transform: task error rate (%)",
+        "panel_title": "transform - task error rate",
         "limit": 100,
-        "limit_label": "100% error after image bump",
+        "unit": "%",
+        "limit_label": "0 -> 100% error after image bump",
         "peg": True,
+        "error_line": "ERROR pyarrow.lib.ArrowInvalid: 'use_legacy_dataset' removed in pyarrow 16 (image on 17)",
+        "stats": [("Error rate", "100%"), ("pyarrow", "14 -> 17"), ("Failed in", "12s")],
     },
     sim={
         "vision": ("The snapshot shows acmeshop_reco_features with ingest green, transform RED, load "
@@ -634,14 +664,18 @@ _ratelimit = Scenario(
                   "unrelated to vendor HTTP 429 throttling.)")},
     ],
     snapshot={
-        "title": "acmeshop_partner_ingest  -  run_3310",
-        "subtitle": "schedule  -  FAILED after 54s",
-        "stages": [("ingest", "FAILED (HTTP 429)", "fail"), ("transform", "skipped", "skip"),
+        "title": "acmeshop_partner_ingest - run_3310",
+        "subtitle": "schedule - FAILED after 54s",
+        "sev": "SEV-2",
+        "stages": [("ingest", "FAILED - HTTP 429", "fail"), ("transform", "skipped", "skip"),
                    ("load", "skipped", "skip")],
-        "panel_title": "ingest: vendor HTTP 429 responses/min",
+        "panel_title": "ingest - vendor HTTP 429 / min",
         "limit": 240,
+        "unit": "429/min",
         "limit_label": "429s spiking after concurrency 4 -> 32",
         "peg": True,
+        "error_line": "ERROR vendor rate limit: HTTP 429 x214 - 32 concurrent > 8 contracted; ingest aborted",
+        "stats": [("Peak 429/min", "240"), ("Concurrency", "4 -> 32"), ("Failed in", "54s")],
     },
     sim={
         "vision": ("The snapshot shows acmeshop_partner_ingest with the FIRST stage, ingest, RED (HTTP 429) "

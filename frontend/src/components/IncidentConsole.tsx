@@ -3,6 +3,7 @@ import {
   approve,
   fireAlert,
   reject,
+  scenarioSnapshotUrl,
   startManual,
   streamIncident,
   type AgentEvent,
@@ -233,6 +234,7 @@ export default function IncidentConsole({ cfg }: { cfg: AppConfig | null }) {
         <ScreenshotDrop
           disabled={busy || phase !== "idle"}
           onPick={(uri) => (manualSnapshot.current = uri)}
+          src={scenarioId ? scenarioSnapshotUrl(scenarioId) : undefined}
         />
         {rootCause && <RootCauseCard rc={rootCause} />}
         {candidates.length > 0 && <HypothesisRaceCard candidates={candidates} />}
@@ -331,22 +333,35 @@ function HypothesisRaceCard({ candidates }: { candidates: CandidateFix[] }) {
 }
 
 function ImpactCard({ impact }: { impact: Impact }) {
+  const speedup = impact.mttr_min > 0 ? impact.human_baseline_min / impact.mttr_min : null;
   return (
-    <div className="glass flex items-center gap-4 p-4">
-      <div className="flex-1">
-        <div className="text-[10px] font-bold uppercase tracking-wider text-muted">MTTR</div>
-        <div className="text-lg font-extrabold text-ok">{impact.mttr_min.toFixed(1)} min</div>
-        <div className="text-[11px] text-muted">vs ~{impact.human_baseline_min} min human baseline</div>
+    <div className="glass relative overflow-hidden p-5">
+      <div className="pointer-events-none absolute -right-6 -top-6 h-28 w-28 rounded-full bg-ok/10 blur-2xl" />
+      <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-ok">
+        <Bolt className="h-4 w-4" /> Business impact
       </div>
-      <div className="h-10 w-px bg-edge" />
-      <div className="flex-1">
-        <div className="text-[10px] font-bold uppercase tracking-wider text-muted">
-          Downtime avoided
+      <div className="mt-3 flex items-end gap-5">
+        <div className="flex-1">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-muted">
+            Downtime avoided
+          </div>
+          <div className="text-[34px] font-extrabold leading-none tracking-tight text-ok">
+            ${impact.dollars_avoided.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          </div>
+          <div className="mt-1 text-[11px] text-muted">estimated, this incident</div>
         </div>
-        <div className="text-lg font-extrabold text-ok">
-          ${impact.dollars_avoided.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+        <div className="h-12 w-px bg-edge" />
+        <div className="flex-1">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-muted">MTTR</div>
+          <div className="text-[34px] font-extrabold leading-none tracking-tight text-accent2">
+            {impact.mttr_min.toFixed(1)}
+            <span className="text-base font-bold text-muted"> min</span>
+          </div>
+          <div className="mt-1 text-[11px] text-muted">
+            vs ~{impact.human_baseline_min} min human
+            {speedup ? ` - ${speedup.toFixed(0)}x faster` : ""}
+          </div>
         </div>
-        <div className="text-[11px] text-muted">estimated, this incident</div>
       </div>
     </div>
   );

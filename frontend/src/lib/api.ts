@@ -178,7 +178,9 @@ export interface SpeedEvent {
   chunk?: string;
   tokens?: number;
   elapsed_ms?: number;
+  ttft_ms?: number;
   tps?: number;
+  error?: string | null;
   cerebras_model?: string;
   baseline_label?: string;
   cerebras_simulated?: boolean;

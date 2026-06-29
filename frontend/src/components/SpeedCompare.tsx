@@ -6,10 +6,12 @@ interface PaneState {
   text: string;
   tokens: number;
   tps: number;
+  ttftMs: number;
   elapsedMs: number;
   done: boolean;
+  error?: string | null;
 }
-const EMPTY: PaneState = { text: "", tokens: 0, tps: 0, elapsedMs: 0, done: false };
+const EMPTY: PaneState = { text: "", tokens: 0, tps: 0, ttftMs: 0, elapsedMs: 0, done: false };
 
 function Stat({ label, value, accent }: { label: string; value: string; accent?: string }) {
   return (
@@ -58,15 +60,20 @@ function Pane({
         )}
       </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-2">
+      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat label="tokens/sec" value={state.tps ? state.tps.toFixed(0) : "-"} accent={accent} />
+        <Stat label="time to 1st tok" value={state.ttftMs ? `${(state.ttftMs / 1000).toFixed(2)}s` : "-"} />
         <Stat label="elapsed" value={`${(state.elapsedMs / 1000).toFixed(2)}s`} />
         <Stat label="tokens" value={`${state.tokens}`} />
       </div>
 
       <div className="relative mt-4 min-h-[160px] flex-1 overflow-hidden rounded-xl border border-edge bg-ink/70 p-3.5 font-mono text-[12.5px] leading-relaxed text-slate-300">
-        {state.text || <span className="text-muted">waiting...</span>}
-        {!state.done && state.text && (
+        {state.error ? (
+          <span className="text-bad">{state.error}</span>
+        ) : (
+          state.text || <span className="text-muted">waiting...</span>
+        )}
+        {!state.done && !state.error && state.text && (
           <span className="ml-0.5 inline-block w-2 animate-blink bg-current align-middle">&nbsp;</span>
         )}
       </div>
@@ -92,6 +99,7 @@ export default function SpeedCompare({ cfg }: { cfg: AppConfig | null }) {
           text: p.text + (e.chunk ?? ""),
           tokens: e.tokens ?? p.tokens,
           tps: e.tps ?? p.tps,
+          ttftMs: e.ttft_ms ?? p.ttftMs,
           elapsedMs: e.elapsed_ms ?? p.elapsedMs,
         });
         e.engine === "cerebras" ? setCerebras(upd) : setBaseline(upd);
@@ -100,8 +108,10 @@ export default function SpeedCompare({ cfg }: { cfg: AppConfig | null }) {
           ...p,
           done: true,
           tps: e.tps ?? p.tps,
+          ttftMs: e.ttft_ms ?? p.ttftMs,
           elapsedMs: e.elapsed_ms ?? p.elapsedMs,
           tokens: e.tokens ?? p.tokens,
+          error: e.error ?? null,
         });
         e.engine === "cerebras" ? setCerebras(fin) : setBaseline(fin);
       } else if (e.type === "done") {
@@ -110,9 +120,10 @@ export default function SpeedCompare({ cfg }: { cfg: AppConfig | null }) {
     });
   }
 
+  // Headline speedup from sustained throughput (tokens/sec), the number people quote.
   const speedup =
-    cerebras.done && baseline.done && cerebras.elapsedMs > 0
-      ? baseline.elapsedMs / cerebras.elapsedMs
+    cerebras.done && baseline.done && baseline.tps > 0 && !cerebras.error && !baseline.error
+      ? cerebras.tps / baseline.tps
       : null;
 
   return (
@@ -136,14 +147,16 @@ export default function SpeedCompare({ cfg }: { cfg: AppConfig | null }) {
           </div>
         )}
         <div className="ml-auto max-w-sm text-right text-[11px] leading-relaxed text-muted">
-          Same root-cause prompt, streamed live. Baseline is a representative GPU host
-          {cfg?.baseline_simulated ? " (simulated rate)" : ""}.
+          Same Gemma 4 prompt, streamed live.{" "}
+          {cfg?.baseline_simulated
+            ? "Baseline is a representative GPU rate (set BASELINE_* to race a real one)."
+            : "Baseline is the same model on a single GPU via Modal - a true side-by-side."}
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
         <Pane
-          title={cfg?.cerebras_simulated ? "Gemma 4 31B - Cerebras (sim)" : "Gemma 4 31B - Cerebras"}
+          title={cfg?.cerebras_simulated ? "Gemma 4 - Cerebras (sim)" : "Gemma 4 - Cerebras"}
           subtitle="Wafer-scale inference"
           accent="text-cerebras"
           ring="shadow-[0_0_0_1px_rgba(52,211,153,0.5),0_24px_60px_-24px_rgba(52,211,153,0.5)]"
@@ -151,8 +164,8 @@ export default function SpeedCompare({ cfg }: { cfg: AppConfig | null }) {
           winner={!!speedup}
         />
         <Pane
-          title={cfg?.baseline_label ?? "GPU baseline"}
-          subtitle="Typical GPU token rate"
+          title={cfg?.baseline_label ?? "Gemma 4 - GPU baseline"}
+          subtitle="Single GPU - vLLM on Modal"
           accent="text-slate-300"
           ring=""
           state={baseline}

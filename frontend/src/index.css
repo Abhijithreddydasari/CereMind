@@ -10,14 +10,15 @@ body,
 
 body {
   margin: 0;
-  color: #e8edf6;
+  color: #d4e4fa;
   font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   background:
-    radial-gradient(900px 500px at 12% -8%, rgba(124, 92, 255, 0.16), transparent 60%),
-    radial-gradient(900px 500px at 92% -12%, rgba(255, 122, 69, 0.12), transparent 55%),
-    #070a12;
+    radial-gradient(1000px 560px at 14% -10%, rgba(34, 211, 238, 0.16), transparent 60%),
+    radial-gradient(900px 520px at 90% -12%, rgba(255, 122, 69, 0.1), transparent 55%),
+    radial-gradient(1200px 700px at 50% 120%, rgba(34, 211, 238, 0.07), transparent 60%),
+    #051424;
   background-attachment: fixed;
 }
 
@@ -29,19 +30,100 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #232c3c;
+  background: #233448;
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #33405a;
+  background: #33506a;
   background-clip: content-box;
+}
+
+/* Ambient "Cerebras core" — concentric glowing rings behind the UI.
+   A lightweight, dependency-free nod to the Three.js core in artifact.html. */
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.ambient .core {
+  position: absolute;
+  top: -16%;
+  right: -10%;
+  width: 620px;
+  height: 620px;
+  border-radius: 999px;
+  background: conic-gradient(
+    from 0deg,
+    rgba(34, 211, 238, 0.0),
+    rgba(34, 211, 238, 0.16),
+    rgba(103, 232, 249, 0.0),
+    rgba(34, 211, 238, 0.16),
+    rgba(34, 211, 238, 0.0)
+  );
+  filter: blur(38px);
+  animation: coreSpin 36s linear infinite;
+}
+.ambient .core::after {
+  content: "";
+  position: absolute;
+  inset: 22%;
+  border-radius: 999px;
+  border: 1px solid rgba(34, 211, 238, 0.18);
+  box-shadow: 0 0 60px rgba(34, 211, 238, 0.25) inset;
+  animation: glowPulse 6s ease-in-out infinite;
+}
+
+/* Vision "scanning" line that sweeps the snapshot Gemma 4 reads. */
+@keyframes scan {
+  0% {
+    top: 4%;
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    top: 94%;
+    opacity: 0;
+  }
+}
+.scanline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.9), transparent);
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.8);
+  animation: scan 3.2s ease-in-out infinite;
+}
+
+@keyframes coreSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes glowPulse {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.05);
+  }
 }
 
 @layer components {
   .glass {
-    @apply rounded-2xl border border-edge bg-panel/70 backdrop-blur-xl shadow-card;
+    @apply rounded-2xl border border-edge bg-panel/60 backdrop-blur-xl shadow-card;
   }
   .pill {
     @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium;
@@ -50,7 +132,7 @@ body {
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-gradient-to-r from-accent to-accent2 text-white shadow-[0_8px_24px_-10px_rgba(124,92,255,0.8)] hover:-translate-y-0.5 hover:brightness-110 active:translate-y-0;
+    @apply btn bg-gradient-to-r from-accent to-accent2 font-bold text-ink shadow-[0_8px_24px_-10px_rgba(34,211,238,0.9)] hover:-translate-y-0.5 hover:brightness-110 active:translate-y-0;
   }
   .btn-danger {
     @apply btn bg-gradient-to-r from-bad to-cerebras text-white shadow-[0_8px_24px_-10px_rgba(251,91,91,0.8)] hover:-translate-y-0.5 hover:brightness-110 active:translate-y-0;

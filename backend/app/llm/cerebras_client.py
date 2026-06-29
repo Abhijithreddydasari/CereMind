@@ -46,6 +46,9 @@ class CerebrasClient:
         self.settings = get_settings()
         self.model = self.settings.cerebras_model
         self.simulated = (not self.settings.has_cerebras) or self.settings.force_simulated
+        # Populated after stream_tokens() finishes: authoritative usage from the
+        # provider (e.g. {"completion_tokens": N}) for an accurate tokens/sec.
+        self.last_usage: Optional[dict[str, Any]] = None
 
     # ----------------------------------------------------------------- chat
     async def chat_completion(
@@ -110,20 +113,33 @@ class CerebrasClient:
         self,
         messages: list[dict[str, Any]],
         reasoning_effort: Optional[str] = None,
+        max_tokens: Optional[int] = None,
     ) -> AsyncGenerator[str, None]:
-        """Yield content token chunks (for the speed-comparison panel)."""
+        """Yield content token chunks (for the speed-comparison panel).
+
+        Requests `stream_options.include_usage` so the provider reports the exact
+        `completion_tokens`, stored on `self.last_usage` for an accurate tokens/sec
+        (we fall back to counting streamed chunks if usage isn't returned).
+        """
+        self.last_usage = None
         if self.simulated:
+            n = 0
             async for chunk in _simulated_stream(self.model):
+                n += 1
                 yield chunk
+            self.last_usage = {"completion_tokens": n}
             return
 
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         if reasoning_effort:
             payload["reasoning_effort"] = reasoning_effort
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
         url = f"{self.settings.cerebras_base_url.rstrip('/')}/chat/completions"
         headers = {"Authorization": f"Bearer {self.settings.cerebras_api_key}"}
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -137,11 +153,21 @@ class CerebrasClient:
                         break
                     try:
                         obj = json.loads(data)
-                        delta = obj["choices"][0]["delta"].get("content")
-                        if delta:
-                            yield delta
-                    except (json.JSONDecodeError, KeyError, IndexError):
+                    except json.JSONDecodeError:
                         continue
+                    if obj.get("usage"):
+                        self.last_usage = obj["usage"]
+                    choices = obj.get("choices") or []
+                    if not choices:
+                        continue
+                    # Gemma 4 streams chain-of-thought under `reasoning` and the
+                    # final answer under `content`. Surface both so the race shows
+                    # Cerebras ripping through reasoning + answer (and counts every
+                    # token toward tokens/sec).
+                    d = choices[0].get("delta") or {}
+                    delta = d.get("content") or d.get("reasoning") or d.get("reasoning_content")
+                    if delta:
+                        yield delta
 
 
 # --------------------------------------------------------------------------- #

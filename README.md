@@ -189,7 +189,8 @@ and the backend then serves the SPA at `http://localhost:8090/`.
 - When it reaches the gate, click **Approve & apply fix** to let CereMind apply the fix and rerun
   the job to green - then it files a preventive **guardrail PR** (Immunize) and shows MTTR + dollars
   avoided. If a rerun doesn't go green, it **auto-rolls-back** its own change and escalates.
-- Open the **Cerebras vs GPU** tab and run the same prompt on both engines.
+- Open the **Cerebras vs Modal** tab and run the same Gemma 4 prompt on both engines
+  (live tokens/sec, time-to-first-token, and the speedup multiple).
 
 ## Verify the real Cerebras path
 
@@ -199,6 +200,35 @@ python smoke_cerebras.py     # checks chat, strict tool calling + reasoning_effo
 python smoke_test.py         # full offline end-to-end agent + RAG + remediation test
 ```
 
+## Speed proof: race Cerebras vs the same model on a GPU (Modal)
+
+The **Cerebras vs Modal** tab runs the *identical* Gemma 4 prompt on two backends
+side by side and reports live **tokens/sec**, **time-to-first-token**, and the
+resulting **speedup** - the headline "why Cerebras" number. Cerebras serves Gemma 4
+on wafer-scale silicon (~1800 tok/s); a single GPU lands in the tens-to-low-hundreds
+of tok/s. To make it a *real* side-by-side (not a simulated rate), stand up the
+open-weight Gemma 4 on one GPU via Modal:
+
+```bash
+pip install modal
+modal token new                                   # authenticate the CLI
+modal secret create huggingface HF_TOKEN=hf_xxx   # Gemma is gated (reuse HUGGINGFACE_TOKEN)
+modal deploy scripts/modal_gemma_vllm.py          # prints an endpoint URL
+```
+
+Then set these in `.env` (note the trailing `/v1`) and restart the backend:
+
+```bash
+BASELINE_BASE_URL=https://<workspace>--ceremind-gemma-baseline-serve.modal.run/v1
+BASELINE_MODEL=gemma-4-modal
+BASELINE_LABEL=Gemma 4 - Modal (H100, vLLM)
+```
+
+The script is parameterized (GPU tier, model variant, speculative decoding) - see its
+header. The first request after a scale-to-zero cold start pays a one-time warm-up; hit
+**Run** once before the demo so the live race is instant. With `BASELINE_*` unset, the
+pane gracefully falls back to a clearly-labeled simulated rate.
+
 ## Configuration (`.env`)
 
 | Variable | Purpose |
@@ -206,7 +236,8 @@ python smoke_test.py         # full offline end-to-end agent + RAG + remediation
 | `CEREBRAS_API_KEY` | Enables real Gemma 4 on Cerebras. Unset = simulated agent. |
 | `CEREBRAS_MODEL` | Defaults to `gemma-4-31b`. |
 | `FORCE_SIMULATED` | `true` forces the deterministic simulated agent even with a key set (offline/deterministic demos & tests). |
-| `BASELINE_BASE_URL` / `BASELINE_MODEL` / `BASELINE_API_KEY` | Optional real GPU endpoint for the speed comparison. Unset = simulated baseline at `BASELINE_SIM_TPS`. |
+| `BASELINE_BASE_URL` / `BASELINE_MODEL` / `BASELINE_API_KEY` | OpenAI-compatible GPU endpoint for the speed race (e.g. Gemma 4 on Modal via `scripts/modal_gemma_vllm.py`). Unset = simulated baseline at `BASELINE_SIM_TPS`. |
+| `BASELINE_LABEL` | Display name for the baseline pane (e.g. `Gemma 4 - Modal (H100, vLLM)`). |
 | `EMBEDDING_BACKEND` | `auto` (EmbeddingGemma if installed, else ST, else hashing) / `embeddinggemma` / `hashing`. |
 | `HUGGINGFACE_TOKEN` | For pulling gated EmbeddingGemma weights. |
 | `PIPELINE_BACKEND` | `mock` (default) or `airflow`. |
@@ -261,5 +292,7 @@ scripts/       deploy_cloudrun.sh
 
 - With no `CEREBRAS_API_KEY`, the agent is a deterministic **simulation** so the UX is fully
   demoable offline; the orchestration code path is identical to the real one.
-- The GPU baseline in the speed tab is always labeled **representative**; with real
-  `BASELINE_*` settings it streams from an actual endpoint for a true side-by-side.
+- The GPU baseline in the speed tab is labeled **representative** until you set
+  `BASELINE_*`; with a real endpoint (e.g. Gemma 4 on Modal) it streams the *same model*
+  from actual hardware for a true side-by-side, and tokens/sec uses the provider's exact
+  `completion_tokens` (not a chunk-count estimate).

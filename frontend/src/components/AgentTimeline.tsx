@@ -56,6 +56,8 @@ const SPECIALIST_ICON: Record<string, (p: any) => JSX.Element> = {
   commander: Brain,
 };
 
+const TERMINAL = new Set(["done", "summary", "error", "rollback"]);
+
 function Row({ e, last }: { e: AgentEvent; last: boolean }) {
   const meta = TYPE_META[e.type] ?? { label: e.type, icon: Activity, color: "text-muted" };
   const Icon = SPECIALIST_ICON[e.actor] && e.type === "specialist_start"
@@ -63,13 +65,18 @@ function Row({ e, last }: { e: AgentEvent; last: boolean }) {
     : meta.icon;
   const actorColor = ACTOR_COLOR[e.actor] ?? "text-slate-300";
   const isMono = e.type === "observation" || e.type === "tool_call";
+  const active = last && !TERMINAL.has(e.type);
 
   return (
     <div className="group relative flex gap-3.5 animate-fadein">
       {/* node + connector */}
       <div className="flex flex-col items-center">
         <div
-          className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-edge bg-elevated ${meta.color}`}
+          className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg border bg-elevated ${meta.color} ${
+            active
+              ? "animate-pulse-node border-accent/60 shadow-cyanGlow"
+              : "border-edge"
+          }`}
         >
           <Icon className="h-3.5 w-3.5" />
         </div>

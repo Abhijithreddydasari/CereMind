@@ -10,3 +10,5 @@ backend/audit/audit.log.jsonl
 .env
 *.log
 .cursor/
+frontend_example.html
+artifact.html
