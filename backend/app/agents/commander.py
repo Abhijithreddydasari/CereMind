@@ -170,7 +170,15 @@ class Commander:
 
         rerun_ok = False
         for action in rc.proposed_actions:
-            obs = registry.dispatch(action.action, action.args)
+            # Enrich model-proposed args with incident context so an omitted
+            # job_id (the model isn't constrained on synthesis output) still works.
+            args = dict(action.args or {})
+            if action.action in ("rerun_job", "retry_with_params") and not (
+                args.get("job_id") or args.get("dag_id") or args.get("job")
+            ):
+                args["job_id"] = incident.trigger.job_id
+            action.args = args
+            obs = registry.dispatch(action.action, args)
             action.status = "executed" if obs.get("ok", True) and "error" not in obs else "failed"
             action.result = obs.get("message") or json.dumps(obs, default=str)[:300]
             yield AgentEvent(

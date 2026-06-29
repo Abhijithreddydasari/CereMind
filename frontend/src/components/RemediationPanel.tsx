@@ -1,10 +1,17 @@
 import type { ProposedAction } from "../lib/api";
+import { Check, Shield, Wrench, X } from "./icons";
 
-const TIER_LABEL: Record<number, { label: string; cls: string }> = {
-  0: { label: "Tier 0 - read only", cls: "text-ok border-ok/40" },
-  1: { label: "Tier 1 - low risk", cls: "text-warn border-warn/40" },
-  2: { label: "Tier 2 - approval required", cls: "text-bad border-bad/40" },
+const TIER: Record<number, { label: string; cls: string }> = {
+  0: { label: "Tier 0 - read only", cls: "border-ok/30 bg-ok/10 text-ok" },
+  1: { label: "Tier 1 - low risk", cls: "border-warn/30 bg-warn/10 text-warn" },
+  2: { label: "Tier 2 - approval required", cls: "border-bad/30 bg-bad/10 text-bad" },
 };
+
+function fmtArgs(args: Record<string, any>) {
+  return Object.entries(args)
+    .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`)
+    .join(", ");
+}
 
 export default function RemediationPanel({
   actions,
@@ -21,29 +28,33 @@ export default function RemediationPanel({
 }) {
   if (actions.length === 0) return null;
   return (
-    <div className="rounded-xl border border-edge bg-panel p-4">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-        Proposed remediation
+    <div className="glass overflow-hidden">
+      <div className="flex items-center gap-2 border-b border-edge/70 px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-300">
+        <Wrench className="h-4 w-4 text-warn" /> Proposed remediation
       </div>
-      <div className="space-y-2">
+
+      <div className="space-y-2 p-4">
         {actions.map((a) => {
-          const tier = TIER_LABEL[a.risk_tier] ?? TIER_LABEL[2];
+          const tier = TIER[a.risk_tier] ?? TIER[2];
           return (
-            <div key={a.id} className="rounded-lg border border-edge bg-panel2 p-2.5">
-              <div className="flex items-center justify-between">
-                <code className="text-sm font-semibold text-slate-100">
-                  {a.action}({Object.values(a.args).join(", ")})
+            <div key={a.id} className="rounded-xl border border-edge bg-panel2/60 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <code className="font-mono text-[13px] font-semibold text-slate-100">
+                  {a.action}
+                  <span className="text-muted">({fmtArgs(a.args)})</span>
                 </code>
-                <span className={`rounded border px-1.5 py-0.5 text-[10px] ${tier.cls}`}>
-                  {tier.label}
-                </span>
+                <span className={`pill ${tier.cls}`}>{tier.label}</span>
               </div>
-              <div className="mt-1 text-[13px] text-slate-400">{a.rationale}</div>
+              <div className="mt-1.5 text-[12.5px] leading-relaxed text-muted">{a.rationale}</div>
               {a.status === "executed" && (
-                <div className="mt-1 text-[12px] text-ok">{a.result}</div>
+                <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-ok/25 bg-ok/10 px-2.5 py-1.5 text-[12px] text-ok">
+                  <Check className="h-3.5 w-3.5" /> {a.result}
+                </div>
               )}
               {a.status === "failed" && (
-                <div className="mt-1 text-[12px] text-bad">{a.result}</div>
+                <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-bad/25 bg-bad/10 px-2.5 py-1.5 text-[12px] text-bad">
+                  <X className="h-3.5 w-3.5" /> {a.result}
+                </div>
               )}
             </div>
           );
@@ -51,21 +62,18 @@ export default function RemediationPanel({
       </div>
 
       {awaiting && (
-        <div className="mt-3 flex items-center gap-2">
-          <button
-            disabled={busy}
-            onClick={onApprove}
-            className="pulse flex-1 rounded-lg bg-ok px-4 py-2 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-50"
-          >
-            Approve &amp; apply fix
-          </button>
-          <button
-            disabled={busy}
-            onClick={onReject}
-            className="rounded-lg border border-edge px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-panel2 disabled:opacity-50"
-          >
-            Reject
-          </button>
+        <div className="border-t border-edge/70 bg-warn/[0.04] p-3">
+          <div className="mb-2 flex items-center gap-1.5 text-[12px] text-warn">
+            <Shield className="h-3.5 w-3.5" /> High-risk fix - human approval required
+          </div>
+          <div className="flex items-center gap-2">
+            <button disabled={busy} onClick={onApprove} className="btn-primary flex-1">
+              <Check className="h-4 w-4" /> Approve &amp; apply fix
+            </button>
+            <button disabled={busy} onClick={onReject} className="btn-ghost">
+              <X className="h-4 w-4" /> Reject
+            </button>
+          </div>
         </div>
       )}
     </div>

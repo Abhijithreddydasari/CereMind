@@ -22,3 +22,6 @@ backend/app/static/
 # OS
 .DS_Store
 Thumbs.db
+
+# Audit
+backend/app/audit/audit.log.jsonl

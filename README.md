@@ -29,6 +29,67 @@ enough to be a real-time, interactive war-room teammate instead of a batch job y
 | Speed | Nice-to-have | The product: interactive RCA in seconds, not minutes |
 | Safety | n/a | Read-only by default; writes gated by human approval + full audit log |
 
+## What makes CereMind different
+
+Most incident-AI projects - even strong multi-agent, multimodal, Cerebras-powered ones -
+are **recommendation engines**: they triage, retrieve runbooks, and produce a *ranked action
+plan*, then hand it to a human and stop. CereMind is the opposite: a **closed-loop operator**
+that acts, proves the fix worked, and prevents the failure from ever recurring - under
+enterprise governance.
+
+> **They diagnose. CereMind resolves - and makes sure it never happens again.**
+>
+> Most tools fight the fire. CereMind also fireproofs the building.
+
+### The "immune system" loop
+
+```
+Detect  ->  Diagnose  ->  Fix  ->  Verify  ->  (Rollback if not green)  ->  Immunize
+(alert)    (cited RCA)  (apply)  (rerun =     (auto-revert + escalate)    (preventive
+                                  green?)                                  guardrail)
+```
+
+### Differentiator scorecard
+
+| Capability | Triage/recommendation tools | CereMind |
+|---|---|---|
+| Closed-loop **action** (apply fix) | No - outputs a plan | **Yes** - applies fix via real tools |
+| **Verify** the fix worked | No | **Yes** - reruns and confirms green |
+| **Auto-rollback** safety net | No | **Adding** - reverts itself + escalates if rerun fails |
+| **Immunize** (prevent recurrence) | No | **Adding** - generates a preventive guardrail/policy + files it |
+| **Hypothesis racing** (speed -> better decisions) | No | **Adding** - scores N candidate fixes in parallel, picks safest |
+| **Business-impact meter** (MTTR + $) | Speed only | **Adding** - live downtime-cost ticker, freezes on resolve |
+| **Blast-radius** / downstream impact | No | **Adding** - downstream dependency + SLA impact map |
+| Risk-tiered **approval gate** | n/a | **Yes** |
+| Immutable **audit log** / post-mortem | Partial | **Yes** |
+| **Sovereign self-host** (open-weight) | Usually SaaS-locked | **Yes** - Gemma + EmbeddingGemma, runs in-perimeter |
+| Real orchestrator via **swappable adapter** | n/a | **Yes** - mock -> Airflow/CI |
+
+(Yes = implemented today; Adding = on the demo roadmap below.)
+
+### Flagship feature - Immunize (preventive guardrail generation)
+
+After an incident is resolved, CereMind generates a **guardrail that makes the entire class
+of failure impossible to recur**, and files it (PR/ticket). For the OOM scenario it proposes,
+e.g., a CI policy: *"block any config change that sets `transform.worker_memory_mb` below 4096;
+require SRE review for memory-affecting changes."* Each incident leaves the system permanently
+more reliable - reactive firefighting becomes compounding prevention. No triage-only tool can
+do this, because prevention requires an agent that already understands and acts on the fix.
+
+### Roadmap features being added (the demo standouts)
+
+1. **Immunize** - the flagship preventive-guardrail step above (a "Prevention" card + filed artifact).
+2. **Verify + auto-rollback** - if the rerun isn't green, CereMind reverts its own change and
+   escalates. Autonomy *with* a seatbelt - the thing that makes "let the AI act" enterprise-credible.
+3. **Hypothesis racing** - because Cerebras is fast, CereMind evaluates multiple candidate fixes
+   (rerun-as-is / bump-memory / revert) in parallel, scores each with a predicted outcome, and
+   picks the safest. Turns raw token speed into **decision quality**, the strongest justification
+   for *why Cerebras specifically*.
+4. **Business-impact meter** - a live downtime-cost + MTTR ticker that counts from the alert and
+   freezes on resolution ("vs ~20 min human MTTR; $X downtime avoided"). Makes Track 3 impact tangible.
+5. **Blast-radius map** - downstream dependency/SLA impact (transform -> load skipped -> revenue
+   dashboard stale -> revenue team blocked) for business context no triage tool surfaces.
+
 ## Architecture
 
 ```

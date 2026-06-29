@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { snapshotUrl } from "../lib/api";
+import { Eye, Image } from "./icons";
 
 // Shows the alert-carried snapshot (read by Gemma 4 vision) and lets an engineer
 // optionally drop their own screenshot before a manual investigation.
@@ -25,17 +26,17 @@ export default function ScreenshotDrop({
   }
 
   return (
-    <div className="rounded-xl border border-edge bg-panel p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Alert snapshot (multimodal input)
+    <div className="glass overflow-hidden">
+      <div className="flex items-center justify-between border-b border-edge/70 px-4 py-3">
+        <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-300">
+          <Image className="h-4 w-4 text-cerebras" /> Alert snapshot
         </div>
         <button
           disabled={disabled}
           onClick={() => inputRef.current?.click()}
-          className="text-[11px] text-accent hover:underline disabled:opacity-40"
+          className="text-[11px] font-medium text-accent2 transition hover:text-accent disabled:opacity-40"
         >
-          Replace with my screenshot
+          Upload my screenshot
         </button>
         <input
           ref={inputRef}
@@ -45,13 +46,14 @@ export default function ScreenshotDrop({
           onChange={(e) => handleFile(e.target.files?.[0])}
         />
       </div>
-      <img
-        src={preview ?? snapshotUrl}
-        alt="pipeline snapshot"
-        className="w-full rounded-lg border border-edge"
-      />
-      <div className="mt-2 text-[11px] text-slate-500">
-        Gemma 4 vision reads this DAG/build snapshot as part of the investigation.
+      <div className="p-3">
+        <div className="overflow-hidden rounded-xl border border-edge ring-1 ring-inset ring-white/5">
+          <img src={preview ?? snapshotUrl} alt="pipeline snapshot" className="w-full" />
+        </div>
+        <div className="mt-2.5 flex items-center gap-1.5 text-[11.5px] text-muted">
+          <Eye className="h-3.5 w-3.5 text-cerebras" />
+          Gemma 4 vision reads this DAG/build snapshot to drive triage.
+        </div>
       </div>
     </div>
   );
