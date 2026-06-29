@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     cerebras_api_key: str = ""
     cerebras_base_url: str = "https://api.cerebras.ai/v1"
     cerebras_model: str = "gemma-4-31b"
+    # Force the deterministic simulated agent even when a key is present
+    # (useful for offline/deterministic demo recordings and tests).
+    force_simulated: bool = False
 
     # GPU baseline
     baseline_base_url: str = ""

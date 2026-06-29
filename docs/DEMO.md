@@ -7,22 +7,24 @@ Everything you need to record the 60-second video and submit to the hackathon.
 ## 60-second demo script (shot-by-shot)
 
 Pre-roll setup (do before recording): run with a real `CEREBRAS_API_KEY` if possible (for
-genuine speed numbers), have the app open at the **War Room** tab, and clear any prior incident
-(reload the page). Optionally set `BASELINE_BASE_URL` to a real GPU endpoint for an honest race.
+genuine speed numbers), have the app open at the **War Room** tab with a scenario selected, and
+clear any prior incident (reload the page). For a fully deterministic offline take, set
+`FORCE_SIMULATED=true`. Optionally set `BASELINE_BASE_URL` to a real GPU endpoint for an honest race.
 
 | Time | On screen | Say (voiceover) |
 |---|---|---|
-| 0:00-0:06 | Title card -> War Room, the red `transform` DAG snapshot visible | "A nightly ETL just failed. Normally on-call spends 20+ minutes digging. Watch CereMind." |
-| 0:06-0:10 | Click **Simulate job-failed alert**. Timeline starts streaming | "The alert fires and CereMind auto-investigates - no human needed." |
-| 0:10-0:18 | VISION event + specialists firing tools live | "Gemma 4 vision reads the dashboard, then three specialist agents pull logs, config history, and runbooks in parallel - on Cerebras, in seconds." |
-| 0:18-0:28 | ROOT CAUSE card with evidence chips + the timer "~X s" | "Root cause, with every claim cited: a config change cut transform memory 8GB to 2GB, so it was OOMKilled. The whole multi-hop investigation took seconds." |
-| 0:28-0:36 | Approval gate; click **Approve & apply fix** | "Read-only by default. The fix is high-risk, so it waits for one click - then CereMind reverts the change and reruns the job." |
-| 0:36-0:42 | EXEC + VERIFY -> "Resolved - pipeline green" | "Reran to green, with a full audit trail. Incident closed." |
-| 0:42-0:56 | Switch to **Cerebras vs GPU**, click run; both panes stream | "Same root-cause prompt, two engines. Cerebras finishes while the GPU baseline is still typing - that speed is what makes an interactive war-room copilot possible." |
-| 0:56-1:00 | Logo + tagline | "CereMind. Gemma 4 on Cerebras. It doesn't just find the problem - it fixes it." |
+| 0:00-0:05 | Title card -> War Room, scenario picker, red DAG snapshot visible | "A data pipeline just failed. On-call normally spends 20+ minutes digging. Watch CereMind." |
+| 0:05-0:09 | Click **Simulate job-failed alert**. Timeline starts streaming | "The alert fires and CereMind auto-investigates - no human needed." |
+| 0:09-0:16 | VISION event + specialists firing tools live | "Gemma 4 vision reads the dashboard, then three specialist agents pull logs, config history, and runbooks - on Cerebras, in seconds." |
+| 0:16-0:24 | ROOT CAUSE card + HYPOTHESIS RACE card | "A cited root cause - and because Cerebras is so fast, it races multiple fixes in parallel and picks the safest. A plain rerun scores near-zero; revert-and-rerun wins." |
+| 0:24-0:32 | Approval gate; click **Approve & apply fix**; EXEC + VERIFY -> green | "Read-only by default; the high-risk fix waits for one click. Then it applies the fix and reruns to green." |
+| 0:32-0:40 | Prevention (Immunize) card + MTTR/$ readout | "It doesn't stop there - it files a guardrail PR so this failure class can't recur, and shows the MTTR and downtime dollars avoided." |
+| 0:40-0:50 | Reload, pick a DIFFERENT scenario, fire it - different root cause/fix | "Four distinct failure classes - OOM, schema drift, a bad dependency bump, a vendor rate-limit - each diagnosed and fixed differently." |
+| 0:50-0:58 | Switch to **Cerebras vs GPU**, click run; both panes stream | "Same prompt, two engines. Cerebras finishes while the GPU baseline is still typing - that speed is what makes an interactive war-room copilot possible." |
+| 0:58-1:00 | Logo + tagline | "CereMind. Gemma 4 on Cerebras. It doesn't just find the problem - it fixes it, and fireproofs the building." |
 
 Recording tips: 1280x720+, hide notifications/tabs/keys, keep cursor movements deliberate.
-The deterministic mock means every take is identical.
+With `FORCE_SIMULATED=true` the mock is deterministic, so every take is identical.
 
 ---
 
@@ -35,13 +37,18 @@ when a pipeline job fails, it auto-triggers, uses **Gemma 4 vision** to read the
 dashboard, then runs a **multi-agent** investigation (an Incident Commander coordinating
 telemetry, change, and knowledge specialists) that **calls real tools** - logs, metrics, config
 diffs, runbook + past-incident search (EmbeddingGemma + Qdrant, permission-aware). It produces a
-**cited root cause**, then - behind a risk-tiered **human approval gate** - applies the fix
-(revert the offending config) and **reruns the job to green**, with a full audit log.
+**cited root cause**, **races candidate fixes in parallel** to pick the safest, then - behind a
+risk-tiered **human approval gate** - applies the fix and **reruns the job to green**. If the rerun
+isn't green it **auto-rolls-back and escalates**; when it succeeds it **files a preventive guardrail
+PR (Immunize)** so the failure class can't recur, and reports MTTR + downtime-dollars avoided. Full
+audit log throughout. Ships with **four distinct incident classes** (OOM, schema drift, dependency
+bump, vendor rate-limit), each diagnosed and fixed differently.
 
 The differentiator is **speed as a capability**: on Cerebras, Gemma 4 31B runs the entire
-multi-hop loop in ~10-15 seconds instead of the minutes other AI-SRE tools take, turning
-incident response from a submit-and-wait batch job into a real-time, interactive war room. We
-include a live side-by-side that races the same prompt on Cerebras vs a GPU baseline.
+multi-hop loop - including parallel hypothesis racing - in seconds instead of the minutes other
+AI-SRE tools take, turning incident response from a submit-and-wait batch job into a real-time,
+interactive war room. We include a live side-by-side that races the same prompt on Cerebras vs a
+GPU baseline.
 
 Enterprise-ready by design: stateless on Cloud Run, secrets in Secret Manager, permission-aware
 retrieval, read-only-by-default with gated writes, append-only audit log, and a swappable

@@ -39,6 +39,7 @@ async def health():
 @app.get("/api/config")
 async def config():
     s = get_settings()
+    from app.pipeline.scenarios import list_scenarios
     from app.rag.embeddings import get_embedder
     from app.rag.ingest import get_vector_store
 
@@ -50,6 +51,7 @@ async def config():
         "embedding_backend": get_embedder().backend,
         "vector_backend": get_vector_store().backend,
         "pipeline_backend": s.pipeline_backend,
+        "scenarios": list_scenarios(),
     }
 
 
