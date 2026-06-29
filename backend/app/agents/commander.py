@@ -70,10 +70,23 @@ def _loads(content: str) -> dict[str, Any]:
         return {}
 
 
+def _llm_usage(res) -> dict[str, Any]:
+    tokens = int(getattr(res, "completion_tokens", 0) or 0)
+    return {
+        "_llm_completion_tokens": tokens,
+        "_llm_latency_ms": round(float(getattr(res, "latency_ms", 0.0) or 0.0), 1),
+        "_llm_model": getattr(res, "model", "") or "",
+        "_llm_simulated": bool(getattr(res, "simulated", False)),
+    }
+
+
 class Commander:
-    def __init__(self) -> None:
-        self.client = CerebrasClient()
+    def __init__(self, client: Any | None = None, engine_label: str | None = None) -> None:
+        self.client = client or CerebrasClient()
         self.settings = get_settings()
+        self.engine_label = engine_label or (
+            f"cerebras:{self.settings.cerebras_model}" if not self.client.simulated else "simulated"
+        )
 
     # --------------------------------------------------------- investigate
     async def investigate(self, incident: Incident) -> AsyncGenerator[AgentEvent, None]:
@@ -88,7 +101,7 @@ class Commander:
             title=trig.title,
             detail=f"job={trig.job_id} failed_task={trig.failed_task or 'unknown'} "
                    f"source={trig.source}",
-            data={"engine": "cerebras:gemma-4-31b" if incident.used_real_llm else "simulated",
+            data={"engine": self.engine_label,
                   "scenario_id": incident.trigger.scenario_id or _active_scenario().id},
         )
 
@@ -114,7 +127,7 @@ class Commander:
             vision_summary = res.content
             yield AgentEvent(incident_id=incident.id, type="vision", actor="commander",
                              title="Read alert snapshot (Gemma 4 vision)", detail=vision_summary,
-                             data={"has_image": True})
+                             data={"has_image": True, **_llm_usage(res)})
 
         # 2) Triage plan (high reasoning).
         context = (
@@ -128,7 +141,7 @@ class Commander:
             reasoning_effort="high", step="triage",
         )
         yield AgentEvent(incident_id=incident.id, type="thought", actor="commander",
-                         title="Triage plan", detail=triage.content)
+                         title="Triage plan", detail=triage.content, data=_llm_usage(triage))
 
         # 3) Specialists.
         findings: list[SpecialistResult] = []
@@ -161,7 +174,7 @@ class Commander:
 
         yield AgentEvent(incident_id=incident.id, type="root_cause", actor="commander",
                          title="Root cause identified", detail=rc.root_cause,
-                         data=rc.model_dump())
+                         data={**rc.model_dump(), **_llm_usage(synth)})
 
         # 5) Hypothesis racing: score N candidate fixes in parallel (Cerebras speed
         #    -> decision quality). Picks the safest fix predicted to go green.
@@ -199,7 +212,7 @@ class Commander:
         if not specs:
             return
 
-        async def score(spec: dict[str, Any]) -> CandidateFix:
+        async def score(spec: dict[str, Any]) -> tuple[CandidateFix, int]:
             if self.client.simulated:
                 r = await self.client.chat_completion(
                     messages=[{"role": "user", "content": "score"}],
@@ -216,18 +229,21 @@ class Commander:
                     messages=msgs, reasoning_effort="low", step=f"race:{spec['action']}",
                     json_object=True)
             d = _loads(r.content)
-            return CandidateFix(
+            fix = CandidateFix(
                 action=spec["action"], args=spec["args"], label=spec["label"],
                 predicted_green=float(d.get("predicted_green", 0.0)),
                 risk_tier=int(d.get("risk_tier", spec.get("risk_tier", 2))),
                 confidence=float(d.get("confidence", 0.0)),
                 predicted_outcome=d.get("predicted_outcome", ""),
             )
+            return fix, int(getattr(r, "completion_tokens", 0) or 0)
 
         # The whole point of Cerebras here: race all candidates concurrently.
         t0 = time.perf_counter()
-        scored = await asyncio.gather(*[score(s) for s in specs])
+        scored_with_usage = await asyncio.gather(*[score(s) for s in specs])
         race_ms = (time.perf_counter() - t0) * 1000.0
+        scored = [fix for fix, _tokens in scored_with_usage]
+        completion_tokens = sum(tokens for _fix, tokens in scored_with_usage)
 
         winner = max(scored, key=lambda c: (c.predicted_green, -c.risk_tier, c.confidence))
         winner.chosen = True
@@ -241,7 +257,9 @@ class Commander:
             incident_id=incident.id, type="hypothesis_race", actor="commander",
             title=f"Raced {len(scored)} candidate fixes in parallel", detail=detail,
             data={"candidates": [c.model_dump() for c in scored], "winner": winner.action,
-                  "race_ms": round(race_ms, 1)},
+                  "race_ms": round(race_ms, 1),
+                  "_llm_completion_tokens": completion_tokens,
+                  "_llm_latency_ms": round(race_ms, 1)},
         )
 
     def _candidate_specs(self, scenario, rc: RootCause) -> list[dict[str, Any]]:

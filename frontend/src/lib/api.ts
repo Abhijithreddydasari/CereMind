@@ -173,10 +173,13 @@ export function streamIncident(
 }
 
 export interface SpeedEvent {
-  type: "start" | "token" | "engine_done" | "done";
+  type: "start" | "token" | "agent_event" | "engine_done" | "done";
   engine?: "cerebras" | "baseline";
   chunk?: string;
+  event?: AgentEvent;
   tokens?: number;
+  token_delta?: number;
+  events?: number;
   elapsed_ms?: number;
   ttft_ms?: number;
   tps?: number;
@@ -185,20 +188,27 @@ export interface SpeedEvent {
   baseline_label?: string;
   cerebras_simulated?: boolean;
   baseline_simulated?: boolean;
+  cost_per_min?: number;
 }
 
-export function streamSpeed(onEvent: (e: SpeedEvent) => void): () => void {
+export function streamSpeed(onEvent: (e: SpeedEvent) => void, onClose?: () => void): () => void {
   const es = new EventSource(`/api/speed/stream`);
   es.onmessage = (m) => {
     try {
       const e = JSON.parse(m.data) as SpeedEvent;
       onEvent(e);
-      if (e.type === "done") es.close();
+      if (e.type === "done") {
+        es.close();
+        onClose?.();
+      }
     } catch {
       /* noop */
     }
   };
-  es.onerror = () => es.close();
+  es.onerror = () => {
+    es.close();
+    onClose?.();
+  };
   return () => es.close();
 }
 

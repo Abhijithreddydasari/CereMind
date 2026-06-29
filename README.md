@@ -110,33 +110,41 @@ Still on the roadmap: a **blast-radius map** (downstream dependency/SLA impact).
 
 ## Architecture
 
-```
-Alert (job-failed webhook, carries a DAG snapshot)
-        |
-        v
-Incident Commander  --- vision (Gemma 4) reads the snapshot
-        |  triage plan
-        v
- Specialist sub-agents (each = bounded ReAct loop, own tools)
-   - telemetry : get_job_runs / get_job_logs / get_metrics
-   - change    : list_recent_config_changes / config_diff
-   - knowledge : query_runbook / find_similar_failures  (EmbeddingGemma + Qdrant)
-        |  findings + observations
-        v
- Synthesis -> structured, cited Root Cause
-        |
-        v
- Hypothesis racing -> score N candidate fixes in parallel (Cerebras), pick safest
-        |
-        v
- [ Tier 2 high-risk? ] --yes--> Human approval gate --approve--> apply fix
-        |                                                          |
-        no (auto)                                                  v
-        +--------------------------------------------> revert_config -> rerun_job
-                                                                   |
-                                            verify green? --no--> auto-rollback + escalate
-                                                   |
-                                                  yes -> summary (MTTR + $) -> Immunize (file guardrail PR) -> audit log
+```mermaid
+flowchart TD
+    A[Job failed alert] --> B[FastAPI incident API]
+    B --> C[Incident Commander]
+    C --> D[Gemma 4 vision reads snapshot]
+    D --> E[Build triage plan]
+
+    E --> F{Run specialist agents}
+    F --> T[Telemetry agent]
+    F --> H[Change agent]
+    F --> K[Knowledge agent]
+
+    T --> TTools[Logs, metrics, job runs]
+    H --> HTools[Config history and diffs]
+    K --> KTools[Runbooks and similar failures]
+
+    TTools --> S[Findings and observations]
+    HTools --> S
+    KTools --> S
+
+    S --> R[Cited root cause]
+    R --> Q[Hypothesis race]
+    Q --> G{Approval needed}
+
+    G -->|yes| P[Human approval gate]
+    G -->|no| X[Apply fix]
+    P -->|approved| X
+
+    X --> V[Verify rerun]
+    V -->|green| I[Immunize with guardrail]
+    V -->|failed| O[Rollback and escalate]
+
+    I --> L[Audit log and summary]
+    O --> L
+    L --> U[War room UI over SSE]
 ```
 
 Everything runs in **one Cloud Run container** (FastAPI serving a React SPA). Gemma 4 runs on
@@ -200,34 +208,37 @@ python smoke_cerebras.py     # checks chat, strict tool calling + reasoning_effo
 python smoke_test.py         # full offline end-to-end agent + RAG + remediation test
 ```
 
-## Speed proof: race Cerebras vs the same model on a GPU (Modal)
+## Speed proof: race Cerebras vs Gemma 4 31B IT on Modal
 
 The **Cerebras vs Modal** tab runs the *identical* Gemma 4 prompt on two backends
 side by side and reports live **tokens/sec**, **time-to-first-token**, and the
 resulting **speedup** - the headline "why Cerebras" number. Cerebras serves Gemma 4
-on wafer-scale silicon (~1800 tok/s); a single GPU lands in the tens-to-low-hundreds
-of tok/s. To make it a *real* side-by-side (not a simulated rate), stand up the
-open-weight Gemma 4 on one GPU via Modal:
+31B on wafer-scale silicon (~1800 tok/s). For the cleanest side-by-side, use a
+Modal Managed Inference Endpoint for `google/gemma-4-31B-it` as the GPU baseline.
 
 ```bash
 pip install modal
 modal token new                                   # authenticate the CLI
-modal secret create huggingface HF_TOKEN=hf_xxx   # Gemma is gated (reuse HUGGINGFACE_TOKEN)
-modal deploy scripts/modal_gemma_vllm.py          # prints an endpoint URL
+# If your CLI supports Auto Endpoints:
+modal endpoint create --name gemma-4-31b-it --model google/gemma-4-31B-it
+
+# If `modal endpoint` is not available, use the Modal dashboard:
+# Endpoints -> Browse all models -> google/gemma-4-31B-it -> Deploy this model
 ```
 
 Then set these in `.env` (note the trailing `/v1`) and restart the backend:
 
 ```bash
-BASELINE_BASE_URL=https://<workspace>--ceremind-gemma-baseline-serve.modal.run/v1
-BASELINE_MODEL=gemma-4-modal
-BASELINE_LABEL=Gemma 4 - Modal (H100, vLLM)
+BASELINE_BASE_URL=https://<modal-endpoint-host>/v1
+BASELINE_MODEL=google/gemma-4-31B-it
+BASELINE_LABEL=Gemma 4 31B IT - Modal Endpoint
 ```
 
-The script is parameterized (GPU tier, model variant, speculative decoding) - see its
-header. The first request after a scale-to-zero cold start pays a one-time warm-up; hit
-**Run** once before the demo so the live race is instant. With `BASELINE_*` unset, the
-pane gracefully falls back to a clearly-labeled simulated rate.
+If the managed endpoint gives you a different model slug, use the slug shown in Modal.
+The first request after a cold start may pay a one-time warm-up; hit **Run** once before
+the demo so the live race is instant. With `BASELINE_*` unset, the pane gracefully falls
+back to a clearly-labeled simulated rate. `scripts/modal_gemma_vllm.py` remains as a
+self-hosted vLLM fallback if the managed endpoint is unavailable.
 
 ## Configuration (`.env`)
 
@@ -236,8 +247,8 @@ pane gracefully falls back to a clearly-labeled simulated rate.
 | `CEREBRAS_API_KEY` | Enables real Gemma 4 on Cerebras. Unset = simulated agent. |
 | `CEREBRAS_MODEL` | Defaults to `gemma-4-31b`. |
 | `FORCE_SIMULATED` | `true` forces the deterministic simulated agent even with a key set (offline/deterministic demos & tests). |
-| `BASELINE_BASE_URL` / `BASELINE_MODEL` / `BASELINE_API_KEY` | OpenAI-compatible GPU endpoint for the speed race (e.g. Gemma 4 on Modal via `scripts/modal_gemma_vllm.py`). Unset = simulated baseline at `BASELINE_SIM_TPS`. |
-| `BASELINE_LABEL` | Display name for the baseline pane (e.g. `Gemma 4 - Modal (H100, vLLM)`). |
+| `BASELINE_BASE_URL` / `BASELINE_MODEL` / `BASELINE_API_KEY` | OpenAI-compatible GPU endpoint for the speed race (prefer Modal Managed Endpoint `google/gemma-4-31B-it`; self-hosted vLLM fallback in `scripts/modal_gemma_vllm.py`). Unset = simulated baseline at `BASELINE_SIM_TPS`. |
+| `BASELINE_LABEL` | Display name for the baseline pane (e.g. `Gemma 4 31B IT - Modal Endpoint`). |
 | `EMBEDDING_BACKEND` | `auto` (EmbeddingGemma if installed, else ST, else hashing) / `embeddinggemma` / `hashing`. |
 | `HUGGINGFACE_TOKEN` | For pulling gated EmbeddingGemma weights. |
 | `PIPELINE_BACKEND` | `mock` (default) or `airflow`. |

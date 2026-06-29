@@ -112,7 +112,15 @@ function Row({ e, last }: { e: AgentEvent; last: boolean }) {
   );
 }
 
-export default function AgentTimeline({ events }: { events: AgentEvent[] }) {
+export default function AgentTimeline({
+  events,
+  emptyTitle = "No active incident",
+  emptyDescription = "Fire an alert to watch CereMind investigate in real time.",
+}: {
+  events: AgentEvent[];
+  emptyTitle?: string;
+  emptyDescription?: string;
+}) {
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -125,10 +133,8 @@ export default function AgentTimeline({ events }: { events: AgentEvent[] }) {
           <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl border border-edge bg-elevated/60">
             <Activity className="h-6 w-6 text-muted" />
           </div>
-          <div className="text-sm font-medium text-slate-300">No active incident</div>
-          <div className="mt-1 text-[13px] text-muted">
-            Fire an alert to watch CereMind investigate in real time.
-          </div>
+          <div className="text-sm font-medium text-slate-300">{emptyTitle}</div>
+          <div className="mt-1 text-[13px] text-muted">{emptyDescription}</div>
         </div>
       </div>
     );

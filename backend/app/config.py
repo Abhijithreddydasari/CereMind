@@ -25,11 +25,11 @@ class Settings(BaseSettings):
     # (useful for offline/deterministic demo recordings and tests).
     force_simulated: bool = False
 
-    # GPU baseline for the speed race (e.g. Gemma 4 on a single GPU via Modal).
+    # GPU baseline for the speed race (e.g. Gemma 4 31B IT on Modal Endpoints).
     baseline_base_url: str = ""
     baseline_api_key: str = ""
     baseline_model: str = ""
-    baseline_label: str = "Gemma 4 - GPU baseline (representative)"
+    baseline_label: str = "Gemma 4 31B IT - GPU baseline (representative)"
     baseline_sim_tps: float = 55.0
 
     # Embeddings
