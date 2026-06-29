@@ -14,6 +14,7 @@ investigation that takes other AI-SRE tools *minutes* completes in **~10-15 seco
 enough to be a real-time, interactive war-room teammate instead of a batch job you check later.
 
 > Built for the Cerebras x Google DeepMind Gemma 4 Hackathon.
+> Submission categories: **Track 1** and **Track 3**.
 > Primary track: **Enterprise Impact**. Secondary: **Multiverse Agents** (multi-agent + multimodal).
 
 ---
